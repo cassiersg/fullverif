@@ -64,7 +64,7 @@ pub enum RndConnection<'a> {
 
 pub fn module2internals<'a, 'b>(
     gadget: &'b Gadget<'a>,
-    lib_gadgets: &Gadgets<'a>,
+    lib_gadgets: &'b Gadgets<'a>,
 ) -> Result<GadgetInternals<'a, 'b>, CompErrors<'a>> {
     // List subgadgets.
     let mut subgadgets = HashMap::new();
@@ -91,7 +91,7 @@ pub fn module2internals<'a, 'b>(
             subgadgets.insert(
                 cell_name.as_str(),
                 GadgetInstance {
-                    kind: gadget,
+                    kind: sg,
                     input_connections: HashMap::new(),
                     random_connections,
                 },
