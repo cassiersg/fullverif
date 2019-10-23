@@ -18,24 +18,22 @@ mod netlist;
 mod timed_gadgets;
 mod utils;
 
-fn check_gadget<'b, 'a: 'b>(
-    netlist: &'a yosys::Netlist,
+fn check_gadget<'a, 'b>(
     gadgets: &'b gadgets::Gadgets<'a>,
     gadget_name: gadgets::GKind<'a>,
     check_state_cleared: bool,
     controls: &mut clk_vcd::ModuleControls,
-) -> Result<Option<timed_gadgets::UnrolledGadgetInternals<'a>>, CompErrors<'a>> {
+) -> Result<Option<timed_gadgets::UnrolledGadgetInternals<'a, 'b>>, CompErrors<'a>> {
     let gadget = &gadgets[gadget_name];
-    let module = &netlist.modules[gadget_name];
     if gadget.strat == netlist::GadgetStrat::Assumed {
         return Ok(None);
     }
     println!("Checking gadget {}...", gadget_name);
     assert_eq!(gadget.strat, netlist::GadgetStrat::CompositeProp);
     println!("computing internals...");
-    let gadget_internals = gadget_internals::module2internals(&module, gadget, &gadgets)?;
+    let gadget_internals = gadget_internals::module2internals(gadget, &gadgets)?;
     println!("internals computed");
-    gadget_internals::check_gadget_preserves_sharings(gadget, &gadgets, &gadget_internals, module)?;
+    gadget_internals::check_gadget_preserves_sharings(&gadgets, &gadget_internals)?;
     println!("Sharings preserved: ok.");
 
     let n_cycles = controls.len() as gadgets::Latency;
@@ -54,9 +52,9 @@ fn check_gadget<'b, 'a: 'b>(
     println!("final n_cycles: {}", n_cycles);
     println!("Loaded simulation states.");
     let unrolled_gadget =
-        timed_gadgets::unroll_gadget(gadget, &gadget_internals, &gadgets, n_cycles, &gadget_name)?;
+        timed_gadgets::unroll_gadget(gadget, gadget_internals, n_cycles, &gadget_name)?;
     println!("Unrolled gadget.");
-    let unrolled_gadget = timed_gadgets::simplify_muxes(unrolled_gadget, controls, &gadgets)?;
+    let unrolled_gadget = timed_gadgets::simplify_muxes(unrolled_gadget, controls)?;
     println!("Mux simplified.");
     let unrolled_gadget = timed_gadgets::do_not_compute_invalid(unrolled_gadget)?;
     println!("Removed invalid computations");
@@ -64,13 +62,12 @@ fn check_gadget<'b, 'a: 'b>(
     for (g, c) in timed_gadgets::list_gadgets(&unrolled_gadget) {
         println!("\t{}: {}", g, c);
     }
-    timed_gadgets::check_valid_outputs(&unrolled_gadget, &gadget)?;
+    timed_gadgets::check_valid_outputs(&unrolled_gadget)?;
     println!("Outputs valid: ok.");
     // This is only a self-check, should never fail
     assert!(timed_gadgets::check_all_inputs_exist(&unrolled_gadget));
     println!("Inputs exist.");
-    let rnd_times =
-        timed_gadgets::randoms_input_timing(&unrolled_gadget, &gadget_internals, controls)?;
+    let rnd_times = timed_gadgets::randoms_input_timing(&unrolled_gadget, controls)?;
     println!("Randoms timed");
     println!("rnd_times:");
     for (i, times) in timed_gadgets::rnd_timing_disp(rnd_times.keys())
@@ -83,9 +80,9 @@ fn check_gadget<'b, 'a: 'b>(
         }
     }
     if check_state_cleared {
-        timed_gadgets::check_state_cleared(&unrolled_gadget, &gadgets, n_cycles)?;
+        timed_gadgets::check_state_cleared(&unrolled_gadget, n_cycles)?;
     }
-    timed_gadgets::check_sec_prop(&unrolled_gadget, gadget, &gadgets)?;
+    timed_gadgets::check_sec_prop(&unrolled_gadget, gadget)?;
     println!("check successful for gadget {}", gadget_name);
     Ok(Some(unrolled_gadget))
 }
@@ -146,13 +143,7 @@ fn check_gadget2<'a>(
         .into());
     }
 
-    let unrolled_gadget = check_gadget(
-        netlist,
-        &gadgets,
-        gadget_name,
-        check_state_cleared,
-        &mut controls,
-    )?;
+    let unrolled_gadget = check_gadget(&gadgets, gadget_name, check_state_cleared, &mut controls)?;
     let unrolled_gadget = if let Some(x) = unrolled_gadget {
         x
     } else {
@@ -160,9 +151,9 @@ fn check_gadget2<'a>(
         return Ok(());
     };
 
-    let mut gadgets_to_check = Vec::new();
+    let mut gadgets_to_check: Vec<(&str, _)> = Vec::new();
     for ((name, cycle), tgi) in unrolled_gadget.subgadgets.iter() {
-        let gadget_name = tgi.base.kind;
+        let gadget_name = tgi.base.kind.name;
         let controls = controls.submodule((*name).to_owned(), *cycle as usize);
         gadgets_to_check.push((gadget_name, controls));
     }
@@ -182,17 +173,11 @@ fn check_gadget2<'a>(
             continue;
         }
 
-        let ur_sg = check_gadget(
-            netlist,
-            &gadgets,
-            sg_name,
-            check_state_cleared,
-            &mut sg_controls,
-        )?;
+        let ur_sg = check_gadget(&gadgets, sg_name, check_state_cleared, &mut sg_controls)?;
         if let Some(ur_sg) = ur_sg {
             for ((name, cycle), tgi) in ur_sg.subgadgets.iter() {
                 gadgets_to_check.push((
-                    tgi.base.kind,
+                    tgi.base.kind.name,
                     sg_controls.submodule((*name).to_owned(), *cycle as usize),
                 ));
             }

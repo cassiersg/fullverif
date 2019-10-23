@@ -25,6 +25,7 @@ impl<'a> Sharing<'a> {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Gadget<'a> {
+    pub name: &'a str,
     pub module: &'a yosys::Module,
     pub clock: Option<&'a str>,
     pub inputs: HashMap<Sharing<'a>, Latency>,
@@ -38,28 +39,30 @@ pub struct Gadget<'a> {
 pub type GKind<'a> = &'a str;
 pub type Gadgets<'a> = HashMap<GKind<'a>, Gadget<'a>>;
 
-fn module2gadget(module: &yosys::Module) -> Result<Option<Gadget>, CompError> {
+fn module2gadget<'a>(
+    module: &'a yosys::Module,
+    name: &'a str,
+) -> Result<Option<Gadget<'a>>, CompError<'a>> {
     let prop = if let Some(prop) = netlist::module_prop(module)? {
         prop
+    } else if let Err(CompError {
+        kind: CompErrorKind::MissingAnnotation(_),
+        ..
+    }) = netlist::module_strat(module)
+    {
+        return Ok(None);
     } else {
-        if let Err(CompError {
-            kind: CompErrorKind::MissingAnnotation(_),
-            ..
-        }) = netlist::module_strat(module)
-        {
-            return Ok(None);
-        } else {
-            return Err(CompError::ref_nw(
-                module,
-                CompErrorKind::MissingAnnotation("psim_prop".to_owned()),
-            ));
-        }
+        return Err(CompError::ref_nw(
+            module,
+            CompErrorKind::MissingAnnotation("psim_prop".to_owned()),
+        ));
     };
     // Decide if gadget is composite or not.
     let strat = netlist::module_strat(module)?;
     let order = netlist::module_order(module)?;
     // Initialize gadget.
     let mut res = Gadget {
+        name,
         module,
         clock: None,
         inputs: HashMap::new(),
@@ -147,7 +150,10 @@ pub fn netlist2gadgets<'a>(
         .modules
         .iter()
         .filter_map(|(module_name, module)| {
-            (|| Ok(module2gadget(module)?.map(|gadget| (module_name.as_str(), gadget))))()
+            (|| {
+                    Ok(module2gadget(module, module_name)?
+                        .map(|gadget| (module_name.as_str(), gadget)))
+                })()
                 .transpose()
         })
         .collect::<Result<HashMap<_, _>, _>>()?;

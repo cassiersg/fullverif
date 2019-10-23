@@ -38,7 +38,7 @@ pub enum CompErrorKind<'a> {
         #[derivative(PartialOrd = "ignore")]
         #[derivative(Ord = "ignore")]
         #[derivative(PartialEq = "ignore")]
-        sgi: timed_gadgets::TGadgetInstance<'a>,
+        input_connections: HashMap<gadgets::Sharing<'a>, timed_gadgets::TConnection<'a>>,
         #[derivative(PartialOrd = "ignore")]
         #[derivative(Ord = "ignore")]
         #[derivative(PartialEq = "ignore")]
@@ -214,7 +214,7 @@ impl<'a> fmt::Display for CompError<'a> {
             CompErrorKind::MixedValidity {
                 validities,
                 subgadget,
-                sgi,
+                input_connections,
                 gadgets_validity,
             } => {
                 writeln!(
@@ -226,11 +226,7 @@ impl<'a> fmt::Display for CompError<'a> {
                 )?;
                 for (sharing, validity, valid_cycles) in validities.iter() {
                     writeln!(f, "\tInput sharing {} is {:?}.", sharing, validity)?;
-                    writeln!(
-                        f,
-                        "\t\tNote: connection: {:?}",
-                        sgi.input_connections[sharing]
-                    )?;
+                    writeln!(f, "\t\tNote: connection: {:?}", input_connections[sharing])?;
                     //if validity == &timed_gadgets::Validity::Invalid {
                     writeln!(f, "\t\tNote: input valid at cycle(s) {:?}.", valid_cycles)?;
                     //}

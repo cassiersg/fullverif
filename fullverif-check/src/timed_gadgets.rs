@@ -1,10 +1,9 @@
 use crate::clk_vcd;
 use crate::error::{CompError, CompErrorKind, CompErrors};
 use crate::gadget_internals::{self, Connection, GName, RndConnection};
-use crate::gadgets::{self, Gadget, Gadgets, Latency, Sharing};
+use crate::gadgets::{self, Gadget, Latency, Sharing};
 use crate::netlist;
 use std::collections::{HashMap, HashSet};
-use yosys_netlist_json as yosys;
 
 pub type Name<'a> = (GName<'a>, Latency);
 pub type TRandom<'a> = (RndConnection<'a>, Latency);
@@ -20,16 +19,16 @@ pub enum TConnection<'a> {
     Invalid(Option<Box<TConnection<'a>>>),
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TGadgetInstance<'a> {
-    pub base: gadget_internals::GadgetInstance<'a>,
+pub struct TGadgetInstance<'a, 'b> {
+    pub base: gadget_internals::GadgetInstance<'a, 'b>,
     pub input_connections: HashMap<Sharing<'a>, TConnection<'a>>,
     pub random_connections: HashMap<gadgets::Random<'a>, TRandom<'a>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct UnrolledGadgetInternals<'a> {
-    module: &'a yosys::Module,
-    pub subgadgets: HashMap<Name<'a>, TGadgetInstance<'a>>,
+pub struct UnrolledGadgetInternals<'a, 'b> {
+    internals: gadget_internals::GadgetInternals<'a, 'b>,
+    pub subgadgets: HashMap<Name<'a>, TGadgetInstance<'a, 'b>>,
     output_connections: HashMap<TSharing<'a>, TConnection<'a>>,
     inputs: HashSet<TSharing<'a>>,
     n_cycles: Latency,
@@ -42,10 +41,9 @@ pub enum Validity {
     Any,
 }
 
-fn time_connection<'a>(
+fn time_connection<'a, 'b>(
     conn: &Connection<'a>,
-    gadgets: &Gadgets<'a>,
-    internals: &gadget_internals::GadgetInternals<'a>,
+    internals: &gadget_internals::GadgetInternals<'a, 'b>,
     inputs: &HashSet<TSharing<'a>>,
     src_latency: Latency,
     cycle: Latency,
@@ -56,7 +54,7 @@ fn time_connection<'a>(
             gadget_name,
             output,
         } => {
-            let output_latency = gadgets[internals.subgadgets[*gadget_name].kind].outputs[output];
+            let output_latency = internals.subgadgets[*gadget_name].kind.outputs[output];
             if let Some(ref_cycle) = (cycle + src_latency)
                 .checked_sub(output_latency)
                 .filter(|ref_cycle| time_range.contains(ref_cycle))
@@ -95,15 +93,14 @@ fn retime_connection<'a>(conn: &TConnection<'a>, cycle: Latency) -> TConnection<
     }
 }
 
-fn time_random<'a>(
+fn time_random<'a, 'b>(
     random_name: &gadgets::Random<'a>,
-    sgi: &gadget_internals::GadgetInstance<'a>,
-    gadgets: &Gadgets<'a>,
+    sgi: &gadget_internals::GadgetInstance<'a, 'b>,
     cycle: Latency,
 ) -> Result<TRandom<'a>, CompError<'a>> {
-    let random_lat = &gadgets[sgi.kind].randoms[random_name].ok_or_else(|| {
+    let random_lat = sgi.kind.randoms[random_name].ok_or_else(|| {
         CompError::ref_sn(
-            &gadgets[sgi.kind].module,
+            sgi.kind.module,
             &random_name.port_name,
             CompErrorKind::MissingAnnotation("psim_lat".to_owned()),
         )
@@ -112,13 +109,12 @@ fn time_random<'a>(
     Ok((sgi.random_connections[random_name], new_cycle))
 }
 
-pub fn unroll_gadget<'a>(
+pub fn unroll_gadget<'a, 'b>(
     gadget: &Gadget<'a>,
-    internals: &gadget_internals::GadgetInternals<'a>,
-    gadgets: &Gadgets<'a>,
+    internals: gadget_internals::GadgetInternals<'a, 'b>,
     n_cycles: Latency,
     _gadget_name: &str,
-) -> Result<UnrolledGadgetInternals<'a>, CompError<'a>> {
+) -> Result<UnrolledGadgetInternals<'a, 'b>, CompError<'a>> {
     debug!("unroll, n_cycles: {}", n_cycles);
     let inputs = gadget
         .inputs
@@ -137,13 +133,12 @@ pub fn unroll_gadget<'a>(
                     .input_connections
                     .iter()
                     .map(|(c_name, conn)| {
-                        let src_latency = gadgets[sgi.kind].inputs[c_name];
+                        let src_latency = sgi.kind.inputs[c_name];
                         (
                             *c_name,
                             time_connection(
                                 conn,
-                                gadgets,
-                                internals,
+                                &internals,
                                 &inputs,
                                 src_latency,
                                 cycle,
@@ -155,12 +150,12 @@ pub fn unroll_gadget<'a>(
                 random_connections: sgi
                     .random_connections
                     .keys()
-                    .map(|r_name| Ok((*r_name, time_random(r_name, sgi, gadgets, cycle)?)))
+                    .map(|r_name| Ok((*r_name, time_random(r_name, sgi, cycle)?)))
                     .collect::<Result<HashMap<_, _>, _>>()?,
             };
             Ok((new_name, instance))
         })
-        .collect::<Result<HashMap<Name<'a>, TGadgetInstance<'a>>, CompError<'a>>>()?;
+        .collect::<Result<HashMap<Name<'a>, TGadgetInstance>, CompError<'a>>>()?;
     let timed_outputs = internals
         .output_connections
         .iter()
@@ -168,12 +163,12 @@ pub fn unroll_gadget<'a>(
         .map(|((output, conn), cycle)| {
             (
                 (*output, cycle),
-                time_connection(conn, gadgets, internals, &inputs, 0, cycle, 0..n_cycles),
+                time_connection(conn, &internals, &inputs, 0, cycle, 0..n_cycles),
             )
         })
         .collect::<HashMap<_, _>>();
     Ok(UnrolledGadgetInternals {
-        module: gadget.module,
+        internals,
         subgadgets: timed_subgadgets,
         output_connections: timed_outputs,
         inputs,
@@ -182,15 +177,14 @@ pub fn unroll_gadget<'a>(
 }
 
 pub fn simplify_muxes<'a, 'b>(
-    mut urgi: UnrolledGadgetInternals<'a>,
-    controls: &mut clk_vcd::ModuleControls<'b>,
-    gadgets: &Gadgets<'a>,
-) -> Result<UnrolledGadgetInternals<'a>, CompError<'a>> {
+    mut urgi: UnrolledGadgetInternals<'a, 'b>,
+    controls: &mut clk_vcd::ModuleControls,
+) -> Result<UnrolledGadgetInternals<'a, 'b>, CompError<'a>> {
     // Map connections from output of muxes to inputs
     let mut conn_mappings = HashMap::new();
     let mut muxes = Vec::new();
     for (sgi_name, sgi) in urgi.subgadgets.iter() {
-        let sg = &gadgets[sgi.base.kind];
+        let sg = sgi.base.kind;
         if sg.prop == netlist::GadgetProp::Mux {
             muxes.push(sgi_name.clone());
             // FIXME parmeterize
@@ -211,7 +205,7 @@ pub fn simplify_muxes<'a, 'b>(
                 clk_vcd::VarState::Vector(_) => unreachable!(),
                 _ => None,
             };
-            for output in gadgets[sgi.base.kind].outputs.keys() {
+            for output in sgi.base.kind.outputs.keys() {
                 let old_conn = TConnection::GadgetOutput {
                     gadget_name: *sgi_name,
                     output: *output,
@@ -226,7 +220,7 @@ pub fn simplify_muxes<'a, 'b>(
                 };
                 if old_conn == new_conn {
                     return Err(CompError::ref_nw(
-                        &urgi.module,
+                        &urgi.internals.gadget.module,
                         CompErrorKind::Unknown(format!(
                             "Mux {:?} takes its output as input.",
                             sgi_name
@@ -251,7 +245,7 @@ pub fn simplify_muxes<'a, 'b>(
         while let Some(new_conn) = conn_mappings.get(curr_conn) {
             if conn_stack.contains(&new_conn) {
                 return Err(CompError::ref_nw(
-                    &urgi.module,
+                    &urgi.internals.gadget.module,
                     CompErrorKind::Unknown(format!(
                         "Shares go through a combinational loop of muxes. Muxes: {:?}",
                         conn_stack
@@ -266,7 +260,7 @@ pub fn simplify_muxes<'a, 'b>(
     Ok(urgi)
 }
 
-fn sort_timed_gadgets<'a>(urgi: &UnrolledGadgetInternals<'a>) -> Vec<Name<'a>> {
+fn sort_timed_gadgets<'a, 'b>(urgi: &UnrolledGadgetInternals<'a, 'b>) -> Vec<Name<'a>> {
     let mut deps = petgraph::Graph::new();
     let nodes = urgi
         .subgadgets
@@ -298,9 +292,9 @@ fn sort_timed_gadgets<'a>(urgi: &UnrolledGadgetInternals<'a>) -> Vec<Name<'a>> {
         .collect::<Vec<_>>()
 }
 
-fn conn_valid<'a>(
+fn conn_valid<'a, 'b>(
     connection: &TConnection<'a>,
-    sg: &HashMap<Name<'a>, TGadgetInstance<'a>>,
+    sg: &HashMap<Name<'a>, TGadgetInstance<'a, 'b>>,
     inputs: &HashSet<TSharing<'a>>,
     gadgets_validity: &HashMap<Name<'a>, Validity>,
 ) -> Validity {
@@ -323,9 +317,9 @@ fn conn_valid<'a>(
     }
 }
 
-fn gadget_valid<'a: 'b, 'b>(
+fn gadget_valid<'a: 'b, 'b, 'c>(
     connections: &'b HashMap<gadgets::Sharing<'a>, TConnection<'a>>,
-    sg: &'b HashMap<Name, TGadgetInstance<'a>>,
+    sg: &'b HashMap<Name, TGadgetInstance<'a, 'c>>,
     inputs: &'b HashSet<TSharing<'a>>,
     gadgets_validity: &HashMap<Name, Validity>,
 ) -> Result<Validity, Vec<(&'b gadgets::Sharing<'a>, &'b TConnection<'a>, Validity)>> {
@@ -343,8 +337,8 @@ fn gadget_valid<'a: 'b, 'b>(
     }
 }
 
-fn get_validities<'a>(
-    urgi: &UnrolledGadgetInternals<'a>,
+fn get_validities<'a, 'b>(
+    urgi: &UnrolledGadgetInternals<'a, 'b>,
     gadgets_validity: &HashMap<Name, Validity>,
     validities: &[(&Sharing<'a>, &TConnection<'a>, Validity)],
 ) -> Vec<(Sharing<'a>, Validity, Vec<Latency>)> {
@@ -366,9 +360,9 @@ fn get_validities<'a>(
         .collect()
 }
 
-pub fn do_not_compute_invalid<'a>(
-    mut urgi: UnrolledGadgetInternals<'a>,
-) -> Result<UnrolledGadgetInternals<'a>, CompErrors<'a>> {
+pub fn do_not_compute_invalid<'a, 'b>(
+    mut urgi: UnrolledGadgetInternals<'a, 'b>,
+) -> Result<UnrolledGadgetInternals<'a, 'b>, CompErrors<'a>> {
     println!("not computing invalid...");
     let sorted_gadgets = sort_timed_gadgets(&urgi);
     let mut gadgets_validity: HashMap<Name, Validity> = HashMap::new();
@@ -395,12 +389,12 @@ pub fn do_not_compute_invalid<'a>(
         let res: Vec<CompError<'a>> = errors_mixed
             .into_iter()
             .map(|(sgi_name, validities)| CompError {
-                module: Some(urgi.module.clone()),
+                module: Some(urgi.internals.gadget.module.clone()),
                 net: None,
                 kind: CompErrorKind::MixedValidity {
                     validities: get_validities(&urgi, &gadgets_validity, &validities),
                     gadgets_validity: gadgets_validity.clone(),
-                    sgi: urgi.subgadgets[sgi_name].clone(),
+                    input_connections: urgi.subgadgets[sgi_name].input_connections.clone(),
                     subgadget: *sgi_name,
                 },
             })
@@ -439,10 +433,10 @@ pub fn do_not_compute_invalid<'a>(
     Ok(urgi)
 }
 
-pub fn check_valid_outputs<'a>(
-    urgi: &UnrolledGadgetInternals<'a>,
-    gadget: &Gadget<'a>,
+pub fn check_valid_outputs<'a, 'b>(
+    urgi: &UnrolledGadgetInternals<'a, 'b>,
 ) -> Result<(), CompError<'a>> {
+    let gadget = urgi.internals.gadget;
     let missing_outputs: Vec<(gadgets::Sharing, u32)> = gadget
         .outputs
         .iter()
@@ -457,29 +451,28 @@ pub fn check_valid_outputs<'a>(
         .collect::<Vec<_>>();
     if !missing_outputs.is_empty() {
         return Err(CompError::ref_nw(
-            &urgi.module,
+            &urgi.internals.gadget.module,
             CompErrorKind::OutputNotValid(missing_outputs),
         ));
     }
     if !excedentary_outputs.is_empty() {
         return Err(CompError::ref_nw(
-            &urgi.module,
+            &urgi.internals.gadget.module,
             CompErrorKind::ExcedentaryOutput(excedentary_outputs),
         ));
     }
     Ok(())
 }
 
-pub fn check_state_cleared<'a>(
-    urgi: &UnrolledGadgetInternals<'a>,
-    gadgets: &Gadgets<'a>,
+pub fn check_state_cleared<'a, 'b>(
+    urgi: &UnrolledGadgetInternals<'a, 'b>,
     n_cycles: Latency,
 ) -> Result<(), CompError<'a>> {
     for ((sgi_name, sgi_cycle), sgi) in urgi.subgadgets.iter() {
-        for (output, out_lat) in gadgets[sgi.base.kind].outputs.iter() {
+        for (output, out_lat) in sgi.base.kind.outputs.iter() {
             if sgi_cycle + out_lat > n_cycles - 1 {
                 return Err(CompError::ref_nw(
-                    &urgi.module,
+                    &urgi.internals.gadget.module,
                     CompErrorKind::LateOutput(
                         sgi_cycle + out_lat - n_cycles + 1,
                         (*sgi_name).to_owned(),
@@ -506,17 +499,16 @@ pub fn check_all_inputs_exist(urgi: &UnrolledGadgetInternals) -> bool {
         })
 }
 
-pub fn check_sec_prop<'a>(
-    urgi: &UnrolledGadgetInternals<'a>,
+pub fn check_sec_prop<'a, 'b>(
+    urgi: &UnrolledGadgetInternals<'a, 'b>,
     gadget: &Gadget<'a>,
-    gadgets: &Gadgets<'a>,
 ) -> Result<(), CompError<'a>> {
     match gadget.prop {
         netlist::GadgetProp::Affine => {
             for (sgi_name, sgi) in urgi.subgadgets.iter() {
-                if !gadgets[sgi.base.kind].prop.is_affine() {
+                if !sgi.base.kind.prop.is_affine() {
                     return Err(CompError::ref_nw(
-                        &urgi.module,
+                        &urgi.internals.gadget.module,
                         CompErrorKind::Unknown(format!("Subgadget {:?} is not Affine", sgi_name)),
                     ));
                 }
@@ -524,9 +516,9 @@ pub fn check_sec_prop<'a>(
         }
         netlist::GadgetProp::PINI => {
             for (sgi_name, sgi) in urgi.subgadgets.iter() {
-                if !gadgets[sgi.base.kind].is_pini() {
+                if !sgi.base.kind.is_pini() {
                     return Err(CompError::ref_nw(
-                        &urgi.module,
+                        &urgi.internals.gadget.module,
                         CompErrorKind::Unknown(format!("Subgadget {:?} is not PINI", sgi_name)),
                     ));
                 }
@@ -540,9 +532,8 @@ pub fn check_sec_prop<'a>(
 }
 
 // Returns None if input is late
-pub fn random_to_input<'a>(
-    internals: &gadget_internals::GadgetInternals<'a>,
-    module: &'a yosys::Module,
+fn random_to_input<'a, 'b>(
+    internals: &gadget_internals::GadgetInternals<'a, 'b>,
     controls: &mut clk_vcd::ModuleControls,
     trandom: &TRandom<'a>,
     sg_name: &Name<'a>,
@@ -554,6 +545,7 @@ pub fn random_to_input<'a>(
     ),
     CompError<'a>,
 > {
+    let module = internals.gadget.module;
     let mut trandom_w: Vec<(RndConnection<'a>, gadgets::Latency)> = vec![(trandom.0, trandom.1)];
     loop {
         let rnd_to_add = match &trandom_w[trandom_w.len() - 1] {
@@ -602,9 +594,8 @@ pub fn random_to_input<'a>(
     }
 }
 
-pub fn randoms_input_timing<'b, 'c, 'a: 'b + 'c>(
-    urgi: &'b UnrolledGadgetInternals<'a>,
-    internals: &'c gadget_internals::GadgetInternals<'a>,
+pub fn randoms_input_timing<'b, 'a: 'b, 'c>(
+    urgi: &'b UnrolledGadgetInternals<'a, 'c>,
     controls: &mut clk_vcd::ModuleControls,
 ) -> Result<HashMap<(gadgets::Random<'a>, Latency), (Name<'a>, gadgets::Random<'a>)>, CompErrors<'a>>
 {
@@ -617,7 +608,7 @@ pub fn randoms_input_timing<'b, 'c, 'a: 'b + 'c>(
     let mut errors: Vec<CompError<'a>> = Vec::<CompError<'a>>::new();
     for (sg_name, sgi) in urgi.subgadgets.iter() {
         for (conn, trandom) in sgi.random_connections.iter() {
-            match random_to_input(internals, &urgi.module, controls, trandom, sg_name, conn) {
+            match random_to_input(&urgi.internals, controls, trandom, sg_name, conn) {
                 Ok((None, _)) => {
                     // A late random. Due to causality, it can only be an issue for correctness of
                     // late outputs. Either we forbid late outputs, or we don't check their
@@ -627,7 +618,7 @@ pub fn randoms_input_timing<'b, 'c, 'a: 'b + 'c>(
                     if let Some(prev) = res.get(&rnd_in) {
                         let trace = traces[&rnd_in].clone();
                         errors.push(CompError::ref_nw(
-                            &urgi.module,
+                            &urgi.internals.gadget.module,
                             CompErrorKind::MultipleUseRandom {
                                 random: rnd_in,
                                 uses: vec![(*prev, trace), ((*sg_name, *conn), trandom_w)],
@@ -651,7 +642,7 @@ pub fn randoms_input_timing<'b, 'c, 'a: 'b + 'c>(
     }
 }
 
-pub fn list_gadgets<'a>(urgi: &UnrolledGadgetInternals<'a>) -> Vec<(GName<'a>, String)> {
+pub fn list_gadgets<'a, 'b>(urgi: &UnrolledGadgetInternals<'a, 'b>) -> Vec<(GName<'a>, String)> {
     let mut gadgets = HashMap::new();
     for (gadget, cycle) in urgi.subgadgets.keys() {
         gadgets
