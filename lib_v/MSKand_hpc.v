@@ -1,7 +1,7 @@
 (* psim_prop = "PINI", psim_strat = "assumed", psim_order=d *)
-module and_pini_cst #(parameter d=2) (ina, inb, rnd, clk, out);
+module MSKand_hpc #(parameter d=2) (ina, inb, rnd, clk, out);
 
-	`include "and_pini_cst.inc"
+	`include "MSKand_hpc.inc"
 
 	(* psim_type = "sharing", psim_latency = 3 *) input  [d-1:0] ina;
 	(* psim_type = "sharing", psim_latency = 2 *) input  [d-1:0] inb;
