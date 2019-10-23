@@ -31,7 +31,7 @@ IV=/usr/local/bin/iverilog
 VVP=/usr/local/bin/vvp
 YOSYS_BIN=/usr/local/bin/yosys
 # Change only if you did not install fullverif from sources or if you moved this script.
-FULL_VERIF=$SCRIPTPATH/target/release/fullverif
+FULL_VERIF=$SCRIPTPATH/fullverif-check/target/release/fullverif
 export FULLVERIF_LIB_DIR=$SCRIPTPATH/lib_v
 
 ## Where to put synthesis and simulation results

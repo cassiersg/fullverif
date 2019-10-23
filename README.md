@@ -217,26 +217,29 @@ Other:
   need randomness since the value itself originally not masked and therefore
   not sensitive.
 
+## Bugs, contributing, etc.
+
+Fullverif is an actively maintained software.
+You are welcome to report bugs, submit enhancements proposals or code on
+github, or through e-mail (to the contact author of the paper linked above).
+
 ## License
 
+The Fullverif tool is primarily distributed under the terms of the GPL3 license.
+The verilog library (`lib_v/`) is primarily distributed under the terms of both
+the MIT license and the Apache License (Version 2.0).
+
+See [LICENSE-GPL3](LICENSE-GPL3), [LICENSE-APACHE](LICENSE-APACHE),
+[LICENSE-MIT](LICENSE-MIT), and [COPYRIGHT](COPYRIGHT) for details.
+
+
+## Further improvements
+
+- Extending to other compositional strategies
+- Invalid computation generalization: allow gadgets using invalid inputs if
+  they do not use randomness (their output will be invalid).
+- Analysis of any affine gadget.
+
+## Fullverif-check code overview
+
 TODO
-
-GPL3
-
-GPL3/MIT for verilog library.
-
-## Code overview
-
-## Early-stage software
-
-TODO
-
-## TODOs
-
-TODO: make it more flexible ?
-
-Extending to other compositional strategies -> isolate strategy analysis.
-
-contributing, code guide
-
-invalid computation generalization
