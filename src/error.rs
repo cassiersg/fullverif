@@ -181,11 +181,7 @@ impl<'a> CompError<'a> {
 impl<'a> fmt::Display for CompError<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if let Some(m) = self.module.as_ref() {
-            write!(
-                f,
-                "masksim-comp: Error in module at {}",
-                ASrc(&m.attributes),
-            )?;
+            write!(f, "fullverif: Error in module at {}", ASrc(&m.attributes),)?;
             if let Some(n) = self.net.as_ref() {
                 writeln!(
                     f,
@@ -391,7 +387,7 @@ impl<'a> fmt::Display for CompErrors<'a> {
         if self.0.len() > n_max {
             writeln!(f, "\t\t[...]")?;
         }
-        writeln!(f, "masksim-comp: {} errors found.", self.0.len())?;
+        writeln!(f, "fullverif: {} errors found.", self.0.len())?;
         Ok(())
     }
 }

@@ -206,8 +206,14 @@ fn check_gadget2<'a>(
 }
 pub fn main_wrap2() -> Result<(), Box<dyn std::error::Error>> {
     let config = config::parse_cmd_line();
-    let file_synth = File::open(&config.json)?;
-    let mut file_simu = File::open(&config.vcd)?;
+    let file_synth = File::open(&config.json)
+        .map_err(|_| format!("Did not find the result of synthesis '{}'.", &config.json))?;
+    let mut file_simu = File::open(&config.vcd).map_err(|_| {
+        format!(
+            "Did not find the vcd file: '{}'.\nPlease check your testbench and simulator commands.",
+            &config.vcd
+        )
+    })?;
     let netlist = yosys::Netlist::from_reader(file_synth)?;
     let root_simu_mod = vec![config.tb.clone()];
     match check_gadget2(
