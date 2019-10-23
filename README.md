@@ -210,7 +210,7 @@ Linear and affine gates:
 - NOT (`MSKinv.v`)
 
 Non-linear gate:
-- AND (`and_pini_cst.v`), as described in the linked eprint paper (TODO: rename to and_hpc).
+- AND (`MSKand_hpc.v`)
 
 Other:
 - Masking a non-sensitive value (`cst_mask.v`). Note: The encoding does not
