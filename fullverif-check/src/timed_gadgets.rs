@@ -27,7 +27,7 @@ pub struct TGadgetInstance<'a, 'b> {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UnrolledGadgetInternals<'a, 'b> {
-    internals: gadget_internals::GadgetInternals<'a, 'b>,
+    pub internals: gadget_internals::GadgetInternals<'a, 'b>,
     pub subgadgets: HashMap<Name<'a>, TGadgetInstance<'a, 'b>>,
     output_connections: HashMap<TSharing<'a>, TConnection<'a>>,
     inputs: HashSet<TSharing<'a>>,
@@ -221,7 +221,7 @@ pub fn simplify_muxes<'a, 'b>(
                 if old_conn == new_conn {
                     return Err(CompError::ref_nw(
                         &urgi.internals.gadget.module,
-                        CompErrorKind::Unknown(format!(
+                        CompErrorKind::Other(format!(
                             "Mux {:?} takes its output as input.",
                             sgi_name
                         )),
@@ -246,7 +246,7 @@ pub fn simplify_muxes<'a, 'b>(
             if conn_stack.contains(&new_conn) {
                 return Err(CompError::ref_nw(
                     &urgi.internals.gadget.module,
-                    CompErrorKind::Unknown(format!(
+                    CompErrorKind::Other(format!(
                         "Shares go through a combinational loop of muxes. Muxes: {:?}",
                         conn_stack
                     )),
@@ -492,38 +492,6 @@ pub fn check_all_inputs_exist(urgi: &UnrolledGadgetInternals) -> bool {
         })
 }
 
-pub fn check_sec_prop<'a, 'b>(
-    urgi: &UnrolledGadgetInternals<'a, 'b>,
-    gadget: &Gadget<'a>,
-) -> Result<(), CompError<'a>> {
-    match gadget.prop {
-        netlist::GadgetProp::Affine => {
-            for (sgi_name, sgi) in urgi.subgadgets.iter() {
-                if !sgi.base.kind.prop.is_affine() {
-                    return Err(CompError::ref_nw(
-                        &urgi.internals.gadget.module,
-                        CompErrorKind::Unknown(format!("Subgadget {:?} is not Affine", sgi_name)),
-                    ));
-                }
-            }
-        }
-        netlist::GadgetProp::PINI => {
-            for (sgi_name, sgi) in urgi.subgadgets.iter() {
-                if !sgi.base.kind.is_pini() {
-                    return Err(CompError::ref_nw(
-                        &urgi.internals.gadget.module,
-                        CompErrorKind::Unknown(format!("Subgadget {:?} is not PINI", sgi_name)),
-                    ));
-                }
-            }
-        }
-        _ => {
-            unimplemented!();
-        }
-    }
-    Ok(())
-}
-
 // Returns None if input is late
 fn random_to_input<'a, 'b>(
     internals: &gadget_internals::GadgetInternals<'a, 'b>,
@@ -555,7 +523,7 @@ fn random_to_input<'a, 'b>(
             (RndConnection::Gate(gate_id), cycle) => match &internals.rnd_gates[&gate_id] {
                 gadget_internals::RndGate::Reg { input: new_conn } => {
                     if *cycle == 0 {
-                        return Err(CompError::ref_nw(module, CompErrorKind::Unknown(format!("Randomness for random {} of gadget {:?} comes from a cycle before cycle 0 (through reg {:?})", rnd_name, sg_name, gate_id))));
+                        return Err(CompError::ref_nw(module, CompErrorKind::Other(format!("Randomness for random {} of gadget {:?} comes from a cycle before cycle 0 (through reg {:?})", rnd_name, sg_name, gate_id))));
                     }
                     (*new_conn, cycle - 1)
                 }
@@ -576,7 +544,7 @@ fn random_to_input<'a, 'b>(
                         Some(sel @ clk_vcd::VarState::Scalar(vcd::Value::Z))
                         | Some(sel @ clk_vcd::VarState::Uninit)
                         | Some(sel @ clk_vcd::VarState::Scalar(vcd::Value::X)) => {
-                            return Err(CompError::ref_nw(module, CompErrorKind::Unknown(format!(
+                            return Err(CompError::ref_nw(module, CompErrorKind::Other(format!(
                                     "Invalid control signal {:?} for mux {} at cycle {} for randomness", sel,
                                     gate_id.0, cycle
                                 ))));

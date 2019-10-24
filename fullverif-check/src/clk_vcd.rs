@@ -32,7 +32,7 @@ impl VcdStates {
         let clock = header
             .find_var(clock)
             .ok_or_else(|| {
-                CompError::no_mod(CompErrorKind::Unknown(format!(
+                CompError::no_mod(CompErrorKind::Other(format!(
                     "Error: Did not find clock {:?} in vcd file.",
                     clock.join(".")
                 )))
@@ -53,7 +53,7 @@ impl VcdStates {
                 .ok_or_else(|| CompError {
                     module: None,
                     net: None,
-                    kind: CompErrorKind::Unknown(format!(
+                    kind: CompErrorKind::Other(format!(
                         "Error: Did not find signal {} in vcd file.",
                         path.join(".")
                     )),
@@ -112,7 +112,7 @@ impl<'a> ModuleControls<'a> {
             .ok_or_else(|| CompError {
                 module: None,
                 net: None,
-                kind: CompErrorKind::Unknown(format!(
+                kind: CompErrorKind::Other(format!(
                     "Error: Enable signal {:?} never asserted.",
                     enable.join(".")
                 )),
@@ -198,7 +198,7 @@ fn clocked_states<'a>(
                         }
                         vcd::Value::X | vcd::Value::Z => {
                             if started {
-                                return Err(CompError::no_mod(CompErrorKind::Unknown(format!(
+                                return Err(CompError::no_mod(CompErrorKind::Other(format!(
                                     "Invalid value for the clock: {:?} (at cycle >= {}).",
                                     value,
                                     states.len()

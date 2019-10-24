@@ -13,6 +13,7 @@ extern crate log;
 extern crate flamer;
 
 mod clk_vcd;
+mod comp_prop;
 mod config;
 mod error;
 mod gadget_internals;
@@ -97,7 +98,7 @@ fn check_gadget<'a, 'b>(
     if check_state_cleared {
         timed_gadgets::check_state_cleared(&unrolled_gadget, n_cycles)?;
     }
-    timed_gadgets::check_sec_prop(&unrolled_gadget, gadget)?;
+    comp_prop::check_sec_prop(&unrolled_gadget, gadget)?;
     println!("check successful for gadget {}", gadget_name);
     Ok(Some(unrolled_gadget))
 }
@@ -143,7 +144,7 @@ fn check_gadget2<'a>(
         return Err(CompError {
             module: Some(netlist.modules[gadget_name].clone()),
             net: None,
-            kind: CompErrorKind::Unknown(format!(
+            kind: CompErrorKind::Other(format!(
                 "Not enough simulated cycles to check the top-level gadget.\n\
                  Note: number of simulated cycles should be at least maximum output delay{}.\n\
                  Note: max_out_delay: {}, n_cycles: {}.",

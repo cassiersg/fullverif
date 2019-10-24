@@ -221,7 +221,7 @@ Other:
 
 Fullverif is an actively maintained software.
 You are welcome to report bugs, submit enhancements proposals or code on
-github, or through e-mail (to the contact author of the paper linked above).
+github, or by e-mail (to the contact author of the paper linked above).
 
 ## License
 
@@ -233,13 +233,15 @@ See [LICENSE-GPL3](LICENSE-GPL3), [LICENSE-APACHE](LICENSE-APACHE),
 [LICENSE-MIT](LICENSE-MIT), and [COPYRIGHT](COPYRIGHT) for details.
 
 
-## Further improvements
-
-- Extending to other compositional strategies
-- Invalid computation generalization: allow gadgets using invalid inputs if
-  they do not use randomness (their output will be invalid).
-- Analysis of any affine gadget.
-
 ## Fullverif-check code overview
 
-TODO
+- `clk_vcd.rs`: Parsing of `vcd` files and representation as a sequence of
+  states at each clock cycles.
+- `netlist.rs`: Parsing of yosys `json` files and of verilog annotations.
+- `gadgets.rs`: Interface of a gadget from the module ports and verilog annotations.
+- `gadget_internals.rs`: Representation of a composite gadget as a graph of
+  sub-gadgets and randomness distribution circuit.
+- `timed_gadgets.rs`: "Unrolling" of a gadget over time, resulting in a
+  computation graph. Analysis of control signals and simplification.
+- `comp_prop.rs`: checking of the compositional strategy based on the
+  computation graph.

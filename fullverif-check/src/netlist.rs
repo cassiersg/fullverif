@@ -109,7 +109,7 @@ pub fn net_attributes<'a>(
                     }
                 }
                 if res.len() != net.bits.len() {
-                    return Err(CompError::ref_sn(module, netname, CompErrorKind::Unknown(format!("Random has not correct length true length: {}, expected: {}, attributes: {:?}",
+                    return Err(CompError::ref_sn(module, netname, CompErrorKind::Other(format!("Random has not correct length true length: {}, expected: {}, attributes: {:?}",
                 net.bits.len(),
                 res.len(),
                 net.attributes
@@ -123,7 +123,7 @@ pub fn net_attributes<'a>(
         _ => Err(CompError::ref_sn(
             module,
             netname,
-            CompErrorKind::Unknown(format!(
+            CompErrorKind::Other(format!(
                 "Wrongly annotated port, attributes: {:?}",
                 net.attributes
             )),

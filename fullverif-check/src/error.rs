@@ -30,7 +30,7 @@ pub struct CompError<'a> {
     Eq
 )]
 pub enum CompErrorKind<'a> {
-    Unknown(String),
+    Other(String),
     MultipleSourceSharing(Vec<Connection<'a>>),
     MixedValidity {
         validities: Vec<(gadgets::Sharing<'a>, timed_gadgets::Validity, Vec<Latency>)>,
@@ -194,7 +194,7 @@ impl<'a> fmt::Display for CompError<'a> {
             }
         }
         match &self.kind {
-            CompErrorKind::Unknown(err) => {
+            CompErrorKind::Other(err) => {
                 writeln!(f, "{}", err)?;
             }
             CompErrorKind::MultipleSourceSharing(sources) => {

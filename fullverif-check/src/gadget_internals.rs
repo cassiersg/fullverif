@@ -79,7 +79,7 @@ pub fn module2internals<'a, 'b>(
                     let rnd = rnd_map.get(rnd_bitval).ok_or_else(|| {
                         CompError::ref_nw(
                             gadget.module,
-                            CompErrorKind::Unknown(format!(
+                            CompErrorKind::Other(format!(
                                 "Bad random bit for port {:?} of subgadget {:?}",
                                 &sg_rnd.port_name, cell_name
                             )),
@@ -349,7 +349,7 @@ fn module2randoms<'a>(
                             })
                             .unwrap_or(true)
                         {
-                            return Err(CompErrors::new(vec![CompError::ref_nw(gadget.module, CompErrorKind::Unknown(format!("The cell {} (port {}[{}]) is connected to a random wire but is not a gadget, mux or DFF (type: {})", cell_name, port_name, offset, cell.cell_type)))]));
+                            return Err(CompErrors::new(vec![CompError::ref_nw(gadget.module, CompErrorKind::Other(format!("The cell {} (port {}[{}]) is connected to a random wire but is not a gadget, mux or DFF (type: {})", cell_name, port_name, offset, cell.cell_type)))]));
                         } else {
                             None
                         }

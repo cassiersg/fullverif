@@ -110,7 +110,7 @@ fn module2gadget<'a>(
                     return Err(CompError::ref_sn(
                         module,
                         port_name,
-                        CompErrorKind::Unknown(
+                        CompErrorKind::Other(
                             "Multiple clocks for gadget, while only one is supported.".to_string(),
                         ),
                     ));
