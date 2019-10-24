@@ -15,5 +15,14 @@ clap = "2.33.0"
 derivative =  { git = "https://github.com/mcarton/rust-derivative" }
 #derivative = "1.0.3"
 
+flame = { version = "0.2.2", optional = true }
+flamer = { version = "0.3", optional = true }
+
 [profile.release]
 debug = true
+
+
+[features]
+default = []
+flame_it = ["flame", "flamer"]
+

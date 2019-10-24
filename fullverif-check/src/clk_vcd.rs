@@ -21,6 +21,7 @@ pub struct VcdStates {
 }
 
 impl VcdStates {
+    #[cfg_attr(feature = "flame_it", flame)]
     pub fn new<'a>(
         r: &mut impl std::io::Read,
         clock: &[impl Borrow<str>],
@@ -154,6 +155,7 @@ impl<'a> ModuleControls<'a> {
     }
 }
 
+#[cfg_attr(feature = "flame_it", flame)]
 fn pad_vec_and_reverse(mut vec: Vec<vcd::Value>, size: u32) -> Vec<vcd::Value> {
     // We need to reverse order of bits since last one in binary writing is at offset 0.
     // Then we pad since leading '0', 'x' or 'z' are not always written.
@@ -167,6 +169,7 @@ fn pad_vec_and_reverse(mut vec: Vec<vcd::Value>, size: u32) -> Vec<vcd::Value> {
     vec
 }
 
+#[cfg_attr(feature = "flame_it", flame)]
 fn clocked_states<'a>(
     vars: &HashMap<vcd::IdCode, vcd::Var>,
     clock: vcd::IdCode,

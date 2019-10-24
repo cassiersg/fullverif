@@ -4,10 +4,13 @@ extern crate derivative;
 use crate::error::{CompError, CompErrorKind, CompErrors};
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::prelude::*;
+use std::io::{prelude::*, BufReader};
 use yosys_netlist_json as yosys;
 #[macro_use]
 extern crate log;
+#[cfg(feature = "flame_it")]
+#[macro_use]
+extern crate flamer;
 
 mod clk_vcd;
 mod config;
@@ -18,6 +21,7 @@ mod netlist;
 mod timed_gadgets;
 mod utils;
 
+#[cfg_attr(feature = "flame_it", flame)]
 fn check_gadget<'a, 'b>(
     gadgets: &'b gadgets::Gadgets<'a>,
     gadget_name: gadgets::GKind<'a>,
@@ -87,6 +91,7 @@ fn check_gadget<'a, 'b>(
     Ok(Some(unrolled_gadget))
 }
 
+#[cfg_attr(feature = "flame_it", flame)]
 fn check_gadget2<'a>(
     netlist: &'a yosys::Netlist,
     simu: &mut impl Read,
@@ -193,12 +198,13 @@ pub fn main_wrap2() -> Result<(), Box<dyn std::error::Error>> {
     let config = config::parse_cmd_line();
     let file_synth = File::open(&config.json)
         .map_err(|_| format!("Did not find the result of synthesis '{}'.", &config.json))?;
-    let mut file_simu = File::open(&config.vcd).map_err(|_| {
+    let file_simu = File::open(&config.vcd).map_err(|_| {
         format!(
             "Did not find the vcd file: '{}'.\nPlease check your testbench and simulator commands.",
             &config.vcd
         )
     })?;
+    let mut file_simu = BufReader::new(file_simu);
     let netlist = yosys::Netlist::from_reader(file_synth)?;
     let root_simu_mod = vec![config.tb.clone()];
     match check_gadget2(
