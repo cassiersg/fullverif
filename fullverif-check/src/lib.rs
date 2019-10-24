@@ -21,6 +21,17 @@ mod netlist;
 mod timed_gadgets;
 mod utils;
 
+#[cfg(feature = "flame_it")]
+mod cflame {
+    pub use flame::{end, start};
+}
+#[cfg(not(feature = "flame_it"))]
+mod cflame {
+    #![allow(dead_code)]
+    pub fn start(_x: &str) {}
+    pub fn end(_x: &str) {}
+}
+
 #[cfg_attr(feature = "flame_it", flame)]
 fn check_gadget<'a, 'b>(
     gadgets: &'b gadgets::Gadgets<'a>,

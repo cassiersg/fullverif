@@ -360,6 +360,7 @@ fn get_validities<'a, 'b>(
         .collect()
 }
 
+#[cfg_attr(feature = "flame_it", flame)]
 pub fn do_not_compute_invalid<'a, 'b>(
     mut urgi: UnrolledGadgetInternals<'a, 'b>,
 ) -> Result<UnrolledGadgetInternals<'a, 'b>, CompErrors<'a>> {
@@ -408,24 +409,16 @@ pub fn do_not_compute_invalid<'a, 'b>(
     for i in (0..sorted_gadgets.len()).rev() {
         let sgi_name = &sorted_gadgets[i];
         match gadgets_validity[sgi_name] {
-            Validity::Valid => {}
-            Validity::Invalid => {
-                urgi.subgadgets.remove(sgi_name);
-            }
-            Validity::Any => {
-                let used = (i + 1..sorted_gadgets.len())
-                    .filter_map(|j| urgi.subgadgets.get(&sorted_gadgets[j]))
-                    .flat_map(|sgi2| sgi2.input_connections.values())
-                    .any(|conn| {
-                        if let TConnection::GadgetOutput { gadget_name, .. } = conn {
-                            gadget_name == sgi_name
-                        } else {
-                            false
-                        }
-                    });
-                if !used {
-                    urgi.subgadgets.remove(sgi_name);
+            Validity::Valid => {
+                for conn in urgi.subgadgets[sgi_name].input_connections.values() {
+                    if let TConnection::GadgetOutput { gadget_name, .. } = conn {
+                        assert!(gadgets_validity[gadget_name] != Validity::Invalid);
+                        gadgets_validity.insert(*gadget_name, Validity::Valid);
+                    }
                 }
+            }
+            Validity::Invalid | Validity::Any => {
+                urgi.subgadgets.remove(sgi_name);
             }
         }
     }
@@ -538,6 +531,7 @@ fn random_to_input<'a, 'b>(
     trandom: &TRandom<'a>,
     sg_name: &Name<'a>,
     rnd_name: &gadgets::Random<'a>,
+    names_cache: &mut HashMap<&'a str, (&'a str, usize)>,
 ) -> Result<
     (
         Option<(gadgets::Random<'a>, gadgets::Latency)>,
@@ -566,12 +560,13 @@ fn random_to_input<'a, 'b>(
                     (*new_conn, cycle - 1)
                 }
                 gadget_internals::RndGate::Mux { ina, inb } => {
-                    let (var_name, offset) =
+                    let (var_name, offset) = names_cache.entry(gate_id.0).or_insert_with(|| {
                         netlist::get_names(module, module.cells[gate_id.0].connections["S"][0])
                             .next()
-                            .expect("No names for net");
+                            .expect("No names for net")
+                    });
                     let var_name = netlist::format_name(var_name);
-                    match controls.lookup(vec![var_name], *cycle as usize, offset)? {
+                    match controls.lookup(vec![var_name], *cycle as usize, *offset)? {
                         None => {
                             return Ok((None, trandom_w.clone()));
                         }
@@ -606,9 +601,17 @@ pub fn randoms_input_timing<'b, 'a: 'b, 'c>(
         Vec<(RndConnection, gadgets::Latency)>,
     >::new();
     let mut errors: Vec<CompError<'a>> = Vec::<CompError<'a>>::new();
+    let mut name_cache = HashMap::new();
     for (sg_name, sgi) in urgi.subgadgets.iter() {
         for (conn, trandom) in sgi.random_connections.iter() {
-            match random_to_input(&urgi.internals, controls, trandom, sg_name, conn) {
+            match random_to_input(
+                &urgi.internals,
+                controls,
+                trandom,
+                sg_name,
+                conn,
+                &mut name_cache,
+            ) {
                 Ok((None, _)) => {
                     // A late random. Due to causality, it can only be an issue for correctness of
                     // late outputs. Either we forbid late outputs, or we don't check their

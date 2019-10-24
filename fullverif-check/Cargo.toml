@@ -20,6 +20,7 @@ flamer = { version = "0.3", optional = true }
 
 [profile.release]
 debug = true
+#lto = true
 
 
 [features]
