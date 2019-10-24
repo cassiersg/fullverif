@@ -198,6 +198,7 @@ pub fn main_wrap2() -> Result<(), Box<dyn std::error::Error>> {
     let config = config::parse_cmd_line();
     let file_synth = File::open(&config.json)
         .map_err(|_| format!("Did not find the result of synthesis '{}'.", &config.json))?;
+    let file_synth = BufReader::new(file_synth);
     let file_simu = File::open(&config.vcd).map_err(|_| {
         format!(
             "Did not find the vcd file: '{}'.\nPlease check your testbench and simulator commands.",
