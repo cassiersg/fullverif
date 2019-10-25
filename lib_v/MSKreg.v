@@ -1,4 +1,4 @@
-(* psim_prop = "affine", psim_strat="assumed", psim_order=d *)
+(* psim_prop = "affine", psim_strat="isolate", psim_order=d *)
 module MSKreg #(parameter d=1, parameter count=1) (clk, in, out);
 
 (* psim_type = "clock" *)   input clk;

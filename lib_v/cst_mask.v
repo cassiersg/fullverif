@@ -1,4 +1,4 @@
-(* psim_prop = "affine", psim_strat = "assumed", psim_order = d *)
+(* psim_prop = "affine", psim_strat = "isolate", psim_order = d *)
 module cst_mask #(parameter d=1, parameter count=1) (cst, out);
 
 	(* psim_type = "control" *)       input [count-1:0] cst;

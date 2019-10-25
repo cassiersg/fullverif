@@ -18,6 +18,7 @@ mod config;
 mod error;
 mod gadget_internals;
 mod gadgets;
+mod inner_affine;
 mod netlist;
 mod timed_gadgets;
 mod utils;
@@ -41,66 +42,81 @@ fn check_gadget<'a, 'b>(
     controls: &mut clk_vcd::ModuleControls,
 ) -> Result<Option<timed_gadgets::UnrolledGadgetInternals<'a, 'b>>, CompErrors<'a>> {
     let gadget = &gadgets[gadget_name];
-    if gadget.strat == netlist::GadgetStrat::Assumed {
-        return Ok(None);
-    }
-    println!("Checking gadget {}...", gadget_name);
-    assert_eq!(gadget.strat, netlist::GadgetStrat::CompositeProp);
-    println!("computing internals...");
-    let gadget_internals = gadget_internals::module2internals(gadget, &gadgets)?;
-    println!("internals computed");
-    gadget_internals::check_gadget_preserves_sharings(&gadgets, &gadget_internals)?;
-    println!("Sharings preserved: ok.");
+    match gadget.strat {
+        netlist::GadgetStrat::Assumed => Ok(None),
+        netlist::GadgetStrat::Isolate => {
+            println!("Checking gadget {}...", gadget_name);
+            if gadget.prop != netlist::GadgetProp::Affine {
+                Err(CompError::ref_nw(
+                    gadget.module,
+                    CompErrorKind::Other(
+                        "Invalid strategy 'isolate' for non-affine gadget".to_owned(),
+                    ),
+                ))?;
+            }
+            inner_affine::check_inner_affine(gadget)?;
+            Ok(None)
+        }
+        netlist::GadgetStrat::CompositeProp => {
+            println!("Checking gadget {}...", gadget_name);
+            assert_eq!(gadget.strat, netlist::GadgetStrat::CompositeProp);
+            println!("computing internals...");
+            let gadget_internals = gadget_internals::module2internals(gadget, &gadgets)?;
+            println!("internals computed");
+            gadget_internals::check_gadget_preserves_sharings(&gadgets, &gadget_internals)?;
+            println!("Sharings preserved: ok.");
 
-    let n_cycles = controls.len() as gadgets::Latency;
-    let max_delay_output = gadget.max_output_lat();
-    if (max_delay_output + 1 > n_cycles) && !check_state_cleared {
-        println!(
+            let n_cycles = controls.len() as gadgets::Latency;
+            let max_delay_output = gadget.max_output_lat();
+            if (max_delay_output + 1 > n_cycles) && !check_state_cleared {
+                println!(
             "Warning: not enough simulated cycles to simulate gadget {}.\nThis indicates that \
              computation of this gadget is late with respect to the output shares.",
             gadget_name
         );
-        return Ok(None);
-    }
-    // This should have been checked before if check_state_cleared == true
-    assert!(!(max_delay_output + 1 >= n_cycles && check_state_cleared));
-    let n_cycles = std::cmp::min(n_cycles, max_delay_output + 2);
-    println!("final n_cycles: {}", n_cycles);
-    println!("Loaded simulation states.");
-    let unrolled_gadget =
-        timed_gadgets::unroll_gadget(gadget, gadget_internals, n_cycles, &gadget_name)?;
-    println!("Unrolled gadget.");
-    let unrolled_gadget = timed_gadgets::simplify_muxes(unrolled_gadget, controls)?;
-    println!("Mux simplified.");
-    let unrolled_gadget = timed_gadgets::do_not_compute_invalid(unrolled_gadget)?;
-    println!("Removed invalid computations");
-    println!("Gadgets:");
-    for (g, c) in timed_gadgets::list_gadgets(&unrolled_gadget) {
-        println!("\t{}: {}", g, c);
-    }
-    timed_gadgets::check_valid_outputs(&unrolled_gadget)?;
-    println!("Outputs valid: ok.");
-    // This is only a self-check, should never fail
-    assert!(timed_gadgets::check_all_inputs_exist(&unrolled_gadget));
-    println!("Inputs exist.");
-    let rnd_times = timed_gadgets::randoms_input_timing(&unrolled_gadget, controls)?;
-    println!("Randoms timed");
-    println!("rnd_times:");
-    for (i, times) in timed_gadgets::rnd_timing_disp(rnd_times.keys())
-        .into_iter()
-        .enumerate()
-    {
-        println!("Cycle {}:", i);
-        for (rnd, offsets) in times {
-            println!("\t{}: {}", rnd, offsets);
+                return Ok(None);
+            }
+            // This should have been checked before if check_state_cleared == true
+            assert!(!(max_delay_output + 1 >= n_cycles && check_state_cleared));
+            let n_cycles = std::cmp::min(n_cycles, max_delay_output + 2);
+            println!("final n_cycles: {}", n_cycles);
+            println!("Loaded simulation states.");
+            let unrolled_gadget =
+                timed_gadgets::unroll_gadget(gadget, gadget_internals, n_cycles, &gadget_name)?;
+            println!("Unrolled gadget.");
+            let unrolled_gadget = timed_gadgets::simplify_muxes(unrolled_gadget, controls)?;
+            println!("Mux simplified.");
+            let unrolled_gadget = timed_gadgets::do_not_compute_invalid(unrolled_gadget)?;
+            println!("Removed invalid computations");
+            println!("Gadgets:");
+            for (g, c) in timed_gadgets::list_gadgets(&unrolled_gadget) {
+                println!("\t{}: {}", g, c);
+            }
+            timed_gadgets::check_valid_outputs(&unrolled_gadget)?;
+            println!("Outputs valid: ok.");
+            // This is only a self-check, should never fail
+            assert!(timed_gadgets::check_all_inputs_exist(&unrolled_gadget));
+            println!("Inputs exist.");
+            let rnd_times = timed_gadgets::randoms_input_timing(&unrolled_gadget, controls)?;
+            println!("Randoms timed");
+            println!("rnd_times:");
+            for (i, times) in timed_gadgets::rnd_timing_disp(rnd_times.keys())
+                .into_iter()
+                .enumerate()
+            {
+                println!("Cycle {}:", i);
+                for (rnd, offsets) in times {
+                    println!("\t{}: {}", rnd, offsets);
+                }
+            }
+            if check_state_cleared {
+                timed_gadgets::check_state_cleared(&unrolled_gadget, n_cycles)?;
+            }
+            comp_prop::check_sec_prop(&unrolled_gadget, gadget)?;
+            println!("check successful for gadget {}", gadget_name);
+            Ok(Some(unrolled_gadget))
         }
     }
-    if check_state_cleared {
-        timed_gadgets::check_state_cleared(&unrolled_gadget, n_cycles)?;
-    }
-    comp_prop::check_sec_prop(&unrolled_gadget, gadget)?;
-    println!("check successful for gadget {}", gadget_name);
-    Ok(Some(unrolled_gadget))
 }
 
 #[cfg_attr(feature = "flame_it", flame)]

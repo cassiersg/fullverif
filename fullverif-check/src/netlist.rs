@@ -78,6 +78,7 @@ impl GadgetProp {
 pub enum GadgetStrat {
     Assumed,
     CompositeProp,
+    Isolate,
 }
 
 pub fn net_attributes<'a>(
@@ -159,6 +160,7 @@ pub fn module_strat<'a>(module: &yosys::Module) -> Result<GadgetStrat, CompError
     })? {
         yosys::AttributeVal::S(attr) if attr == "assumed" => Ok(GadgetStrat::Assumed),
         yosys::AttributeVal::S(attr) if attr == "composite" => Ok(GadgetStrat::CompositeProp),
+        yosys::AttributeVal::S(attr) if attr == "isolate" => Ok(GadgetStrat::Isolate),
         attr => Err(CompError::ref_nw(
             module,
             CompErrorKind::WrongAnnotation("psim_strat".to_owned(), attr.clone()),

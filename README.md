@@ -124,6 +124,10 @@ For each gadget, the following annotation are required on the module itself:
       will thus not be analyzed by itself (its components will be analyzed as
       part of the modules in which it is instantiated). Therefore, no other
       annotation is required on this module or on its ports.
+    * `"isolate"`: this strategies only applies to gadgets whose property is
+      `affine`, and makes a topological check that the gadget is a "trivial
+      implementation": any output share of the gadget must only be wired to the
+      corresponding input shares.
 
 All the ports of the module also have to be annotated using the `psim_type`
 attribute, which may have any of the four following values:
