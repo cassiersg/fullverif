@@ -171,4 +171,8 @@ impl<'a> Gadget<'a> {
             .max()
             .expect("No output for gadget")
     }
+    pub fn sharing_bits(&self, sharing: Sharing<'a>) -> &'a [yosys::BitVal] {
+        &self.module.ports[sharing.port_name].bits[(sharing.pos * self.order) as usize..]
+            [..self.order as usize]
+    }
 }

@@ -72,11 +72,7 @@ pub fn check_inner_affine<'a>(gadget: &Gadget<'a>) -> Result<(), CompError<'a>> 
     let mut tagged_wires: HashMap<yosys::BitVal, u32> = HashMap::new();
     let mut wires_to_analyze: Vec<yosys::BitVal> = Vec::new();
     for input in gadget.inputs.keys() {
-        for (i, bv) in gadget.module.ports[input.port_name].bits
-            [(input.pos * gadget.order) as usize..][..gadget.order as usize]
-            .iter()
-            .enumerate()
-        {
+        for (i, bv) in gadget.sharing_bits(*input).iter().enumerate() {
             insert_or_fail(
                 gadget,
                 &mut tagged_wires,
@@ -114,6 +110,17 @@ pub fn check_inner_affine<'a>(gadget: &Gadget<'a>) -> Result<(), CompError<'a>> 
                     }
                 }
             }
+        }
+    }
+    for output in gadget.outputs.keys() {
+        for (i, bv) in gadget.sharing_bits(*output).iter().enumerate() {
+            insert_or_fail(
+                gadget,
+                &mut tagged_wires,
+                &mut wires_to_analyze,
+                *bv,
+                i as u32,
+            )?;
         }
     }
     Ok(())
