@@ -1,7 +1,7 @@
 use crate::clk_vcd;
 use crate::error::{CompError, CompErrorKind, CompErrors};
 use crate::gadget_internals::{self, Connection, GName, RndConnection};
-use crate::gadgets::{self, Gadget, Latency, Sharing};
+use crate::gadgets::{self, Gadget, Input, Latency, Sharing};
 use crate::netlist;
 use std::collections::{HashMap, HashSet};
 
@@ -21,7 +21,7 @@ pub enum TConnection<'a> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TGadgetInstance<'a, 'b> {
     pub base: gadget_internals::GadgetInstance<'a, 'b>,
-    pub input_connections: HashMap<Sharing<'a>, TConnection<'a>>,
+    pub input_connections: HashMap<Input<'a>, TConnection<'a>>,
     pub random_connections: HashMap<gadgets::Random<'a>, TRandom<'a>>,
 }
 
@@ -44,7 +44,6 @@ pub enum Validity {
 fn time_connection<'a, 'b>(
     conn: &Connection<'a>,
     internals: &gadget_internals::GadgetInternals<'a, 'b>,
-    inputs: &HashSet<TSharing<'a>>,
     src_latency: Latency,
     cycle: Latency,
     time_range: std::ops::Range<Latency>,
@@ -70,13 +69,30 @@ fn time_connection<'a, 'b>(
         }
         Connection::Input(input) => {
             let tsharing = (*input, src_latency + cycle);
-            if inputs.contains(&tsharing) {
+            if internals.gadget.inputs[input].contains(&tsharing.1) {
                 TConnection::Input(tsharing)
             } else {
                 TConnection::Invalid(Some(Box::new(TConnection::Input(tsharing))))
             }
         }
     }
+}
+fn time_connections<'a, 'b>(
+    conn: &Connection<'a>,
+    internals: &gadget_internals::GadgetInternals<'a, 'b>,
+    src_latencies: &[Latency],
+    cycle: Latency,
+    time_range: std::ops::Range<Latency>,
+) -> Vec<(TConnection<'a>, Latency)> {
+    src_latencies
+        .iter()
+        .map(|src_latency| {
+            (
+                time_connection(conn, internals, *src_latency, cycle, time_range.clone()),
+                *src_latency,
+            )
+        })
+        .collect()
 }
 
 fn retime_connection<'a>(conn: &TConnection<'a>, cycle: Latency) -> TConnection<'a> {
@@ -119,7 +135,7 @@ pub fn unroll_gadget<'a, 'b>(
     let inputs = gadget
         .inputs
         .iter()
-        .map(|(input, lat)| (*input, *lat))
+        .flat_map(|(input, lats)| lats.iter().map(move |lat| (*input, *lat)))
         .collect::<HashSet<_>>();
     let timed_subgadgets = internals
         .subgadgets
@@ -133,19 +149,12 @@ pub fn unroll_gadget<'a, 'b>(
                     .input_connections
                     .iter()
                     .map(|(c_name, conn)| {
-                        let src_latency = sgi.kind.inputs[c_name];
-                        (
-                            *c_name,
-                            time_connection(
-                                conn,
-                                &internals,
-                                &inputs,
-                                src_latency,
-                                cycle,
-                                0..n_cycles,
-                            ),
-                        )
+                        let src_latencies = &sgi.kind.inputs[c_name];
+                        time_connections(conn, &internals, src_latencies, cycle, 0..n_cycles)
+                            .into_iter()
+                            .map(move |(conn, src_lat)| ((*c_name, src_lat), conn))
                     })
+                    .flatten()
                     .collect::<HashMap<_, _>>(),
                 random_connections: sgi
                     .random_connections
@@ -163,7 +172,7 @@ pub fn unroll_gadget<'a, 'b>(
         .map(|((output, conn), cycle)| {
             (
                 (*output, cycle),
-                time_connection(conn, &internals, &inputs, 0, cycle, 0..n_cycles),
+                time_connection(conn, &internals, 0, cycle, 0..n_cycles),
             )
         })
         .collect::<HashMap<_, _>>();
@@ -211,10 +220,13 @@ pub fn simplify_muxes<'a, 'b>(
                     output: *output,
                 };
                 let new_conn = match sel {
-                    Some(sel_bool) => sgi.input_connections[&gadgets::Sharing {
-                        port_name: if sel_bool { "in_true" } else { "in_false" },
-                        pos: output.pos,
-                    }]
+                    Some(sel_bool) => sgi.input_connections[&(
+                        gadgets::Sharing {
+                            port_name: if sel_bool { "in_true" } else { "in_false" },
+                            pos: output.pos,
+                        },
+                        0,
+                    )]
                         .clone(),
                     None => TConnection::Invalid(None),
                 };
@@ -318,11 +330,11 @@ fn conn_valid<'a, 'b>(
 }
 
 fn gadget_valid<'a: 'b, 'b, 'c>(
-    connections: &'b HashMap<gadgets::Sharing<'a>, TConnection<'a>>,
+    connections: &'b HashMap<Input<'a>, TConnection<'a>>,
     sg: &'b HashMap<Name, TGadgetInstance<'a, 'c>>,
     inputs: &'b HashSet<TSharing<'a>>,
     gadgets_validity: &HashMap<Name, Validity>,
-) -> Result<Validity, Vec<(&'b gadgets::Sharing<'a>, &'b TConnection<'a>, Validity)>> {
+) -> Result<Validity, Vec<(&'b Input<'a>, &'b TConnection<'a>, Validity)>> {
     let validities = connections
         .iter()
         .map(|(port, conn)| (port, conn, conn_valid(conn, sg, inputs, gadgets_validity)))
@@ -340,8 +352,8 @@ fn gadget_valid<'a: 'b, 'b, 'c>(
 fn get_validities<'a, 'b>(
     urgi: &UnrolledGadgetInternals<'a, 'b>,
     gadgets_validity: &HashMap<Name, Validity>,
-    validities: &[(&Sharing<'a>, &TConnection<'a>, Validity)],
-) -> Vec<(Sharing<'a>, Validity, Vec<Latency>)> {
+    validities: &[(&Input<'a>, &TConnection<'a>, Validity)],
+) -> Vec<(Input<'a>, Validity, Vec<Latency>)> {
     validities
         .iter()
         .map(|(sharing, conn, validity)| {

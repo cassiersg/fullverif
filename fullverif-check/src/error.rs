@@ -33,12 +33,16 @@ pub enum CompErrorKind<'a> {
     Other(String),
     MultipleSourceSharing(Vec<Connection<'a>>),
     MixedValidity {
-        validities: Vec<(gadgets::Sharing<'a>, timed_gadgets::Validity, Vec<Latency>)>,
+        validities: Vec<(
+            (gadgets::Sharing<'a>, Latency),
+            timed_gadgets::Validity,
+            Vec<Latency>,
+        )>,
         subgadget: timed_gadgets::Name<'a>,
         #[derivative(PartialOrd = "ignore")]
         #[derivative(Ord = "ignore")]
         #[derivative(PartialEq = "ignore")]
-        input_connections: HashMap<gadgets::Sharing<'a>, timed_gadgets::TConnection<'a>>,
+        input_connections: HashMap<(gadgets::Sharing<'a>, Latency), timed_gadgets::TConnection<'a>>,
         #[derivative(PartialOrd = "ignore")]
         #[derivative(Ord = "ignore")]
         #[derivative(PartialEq = "ignore")]
@@ -75,6 +79,7 @@ pub enum CompErrorKind<'a> {
         yosys::AttributeVal,
     ),
     MissingAnnotation(String),
+    ConflictingAnnotations(&'a str, &'a str),
     WrongWireWidth(u32, u32),
     NoOutput,
     LateOutput(Latency, String, gadgets::Sharing<'a>),
@@ -225,7 +230,7 @@ impl<'a> fmt::Display for CompError<'a> {
                     subgadget.1
                 )?;
                 for (sharing, validity, valid_cycles) in validities.iter() {
-                    writeln!(f, "\tInput sharing {} is {:?}.", sharing, validity)?;
+                    writeln!(f, "\tInput sharing {:?} is {:?}.", sharing, validity)?;
                     writeln!(f, "\t\tNote: connection: {:?}", input_connections[sharing])?;
                     //if validity == &timed_gadgets::Validity::Invalid {
                     writeln!(f, "\t\tNote: input valid at cycle(s) {:?}.", valid_cycles)?;
@@ -297,6 +302,13 @@ impl<'a> fmt::Display for CompError<'a> {
             }
             CompErrorKind::MissingAnnotation(attr) => {
                 writeln!(f, "Missing attribute {}.", attr)?;
+            }
+            CompErrorKind::ConflictingAnnotations(attr1, attr2) => {
+                writeln!(
+                    f,
+                    "Conflicting attributes {} and {}. (Only one of those may be provided.)",
+                    attr1, attr2
+                )?;
             }
             CompErrorKind::WrongWireWidth(actual, expected) => {
                 writeln!(

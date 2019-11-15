@@ -34,6 +34,7 @@ Once those control signals are known, the dataflow can be computed and analyzed.
 
 **Build**
 - `git clone https://github.com/cassiersg/fullverif.git`
+- cd fullverif/fullverif-check
 - `cargo build --release`
 
 ### Test (unix-like)
@@ -147,6 +148,11 @@ top-level module, for which it is inferred.
 *Latency specification.* The latency is given for input and output sharings and
 randomness in number of clock cycles.
 For each module, all latencies must be postitive integers.
+Input sharings may be valid at more than one clock cycle. This is specified by
+using the `psim_latencies` attribute in place of the `psim_latency` attribute.
+The value of the `psim_latencies` attribute must be a positive integer.
+Let `bi` be the `i`-th bit of the binary decomposition of that value, with `b0`
+the LSB. The input is valid at cycle `i` iff `bi` is 1.
 
 
 ### Structure of fullverif (analysis phase)

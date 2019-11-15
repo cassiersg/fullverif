@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use yosys_netlist_json as yosys;
 
 pub type Latency = u32;
+pub type Latencies = Vec<u32>;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Random<'a> {
@@ -17,6 +18,8 @@ pub struct Sharing<'a> {
     pub pos: u32,
 }
 
+pub type Input<'a> = (Sharing<'a>, Latency);
+
 impl<'a> Sharing<'a> {
     pub fn new(port_name: &'a str, pos: u32) -> Self {
         Self { port_name, pos }
@@ -28,7 +31,7 @@ pub struct Gadget<'a> {
     pub name: &'a str,
     pub module: &'a yosys::Module,
     pub clock: Option<&'a str>,
-    pub inputs: HashMap<Sharing<'a>, Latency>,
+    pub inputs: HashMap<Sharing<'a>, Latencies>,
     pub outputs: HashMap<Sharing<'a>, Latency>,
     pub randoms: HashMap<Random<'a>, Option<Latency>>,
     pub prop: GadgetProp,
@@ -75,8 +78,8 @@ fn module2gadget<'a>(
     // Classify ports of the gadgets.
     for (port_name, port) in module.ports.iter() {
         match (netlist::net_attributes(module, port_name)?, port.direction) {
-            (WireAttrs::Sharing { latency, count }, dir @ yosys::PortDirection::Input)
-            | (WireAttrs::Sharing { latency, count }, dir @ yosys::PortDirection::Output) => {
+            (WireAttrs::Sharing { latencies, count }, dir @ yosys::PortDirection::Input)
+            | (WireAttrs::Sharing { latencies, count }, dir @ yosys::PortDirection::Output) => {
                 if port.bits.len() as u32 != order * count {
                     return Err(CompError::ref_sn(
                         module,
@@ -85,12 +88,19 @@ fn module2gadget<'a>(
                     ));
                 }
                 for pos in 0..count {
-                    (if dir == yosys::PortDirection::Input {
-                        &mut res.inputs
+                    if dir == yosys::PortDirection::Input {
+                        res.inputs
+                            .insert(Sharing::new(port_name, pos), latencies.clone());
                     } else {
-                        &mut res.outputs
-                    })
-                    .insert(Sharing::new(port_name, pos), latency);
+                        if latencies.len() != 1 {
+                            return Err(CompError::ref_sn(
+                        module,
+                        port_name,
+                        CompErrorKind::Other(format!("Outputs can be valid at only one cycle (current latencies: {:?})", latencies))));
+                        }
+                        res.outputs
+                            .insert(Sharing::new(port_name, pos), latencies[0]);
+                    }
                 }
             }
             (WireAttrs::Random(randoms), yosys::PortDirection::Input) => {

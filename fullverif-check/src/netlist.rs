@@ -35,6 +35,7 @@ fn get_int_attr<'a>(
         Ok(None)
     }
 }
+
 fn get_int_attr_needed<'a>(
     module: &yosys::Module,
     netname: &str,
@@ -44,10 +45,40 @@ fn get_int_attr_needed<'a>(
         .ok_or_else(|| CompError::missing_annotation(module, netname, attr))
 }
 
+fn get_bitstring_attr<'a>(
+    module: &yosys::Module,
+    netname: &str,
+    attr: &str,
+) -> Result<Option<Vec<bool>>, CompError<'a>> {
+    if let Some(attr_v) = module.netnames[netname].attributes.get(attr) {
+        match attr_v {
+            yosys::AttributeVal::N(x) => {
+                Ok(Some((0..32).map(|i| ((*x >> i) & 0x1) == 0x1).collect()))
+            }
+            yosys::AttributeVal::S(x) => Ok(Some(
+                x.chars()
+                    .rev()
+                    .map(|c| match c {
+                        '0' => Ok(false),
+                        '1' => Ok(true),
+                        _ => Err(CompError::ref_sn(
+                            module,
+                            netname,
+                            CompErrorKind::WrongAnnotation(attr.to_owned(), attr_v.clone()),
+                        )),
+                    })
+                    .collect::<Result<Vec<bool>, _>>()?,
+            )),
+        }
+    } else {
+        Ok(None)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum WireAttrs {
     Sharing {
-        latency: gadgets::Latency,
+        latencies: gadgets::Latencies,
         count: u32,
     },
     Random(Vec<Option<gadgets::Latency>>),
@@ -89,10 +120,30 @@ pub fn net_attributes<'a>(
     let psim_type = net.attributes.get("psim_type");
     let psim_count = get_int_attr(module, netname, "psim_count")?;
     match psim_type {
-        Some(yosys::AttributeVal::S(kind)) if kind == "sharing" => Ok(WireAttrs::Sharing {
-            latency: get_int_attr_needed(module, netname, "psim_latency")?,
-            count: psim_count.unwrap_or(1),
-        }),
+        Some(yosys::AttributeVal::S(kind)) if kind == "sharing" => {
+            let latency = get_int_attr(module, netname, "psim_latency")?;
+            let latencies = get_bitstring_attr(module, netname, "psim_latencies")?;
+            let latencies = if latency.is_some() && latencies.is_some() {
+                return Err(CompError::ref_sn(
+                    module,
+                    netname,
+                    CompErrorKind::ConflictingAnnotations("psim_latency", "psim_latencies"),
+                ));
+            } else if let Some(l) = latencies {
+                l.into_iter()
+                    .positions(|x| x)
+                    .map(|x| x as Latency)
+                    .collect()
+            } else if let Some(l) = latency {
+                vec![l]
+            } else {
+                return Err(CompError::missing_annotation(module, netname, "psim_count"));
+            };
+            Ok(WireAttrs::Sharing {
+                latencies,
+                count: psim_count.unwrap_or(1),
+            })
+        }
         Some(yosys::AttributeVal::S(kind)) if kind == "random" => {
             let psim_count = psim_count
                 .ok_or_else(|| CompError::missing_annotation(module, netname, "psim_count"))?;
