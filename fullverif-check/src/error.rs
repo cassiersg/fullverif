@@ -60,7 +60,7 @@ pub enum CompErrorKind<'a> {
     MultipleUseRandom {
         random: (gadgets::Random<'a>, gadgets::Latency),
         uses: Vec<(
-            (timed_gadgets::Name<'a>, gadgets::Random<'a>),
+            (timed_gadgets::Name<'a>, timed_gadgets::TRandom<'a>),
             Vec<(RndConnection<'a>, gadgets::Latency)>,
         )>,
     },
@@ -79,15 +79,15 @@ pub enum CompErrorKind<'a> {
         yosys::AttributeVal,
     ),
     MissingAnnotation(String),
-    ConflictingAnnotations(&'a str, &'a str),
+    ConflictingAnnotations(String, String),
     WrongWireWidth(u32, u32),
     NoOutput,
     LateOutput(Latency, String, gadgets::Sharing<'a>),
     BadShareUse(Connection<'a>, String, String, usize),
     InvalidRandom(
-        Vec<timed_gadgets::TRandom<'a>>,
+        Vec<timed_gadgets::TRndConnection<'a>>,
         timed_gadgets::Name<'a>,
-        gadgets::Random<'a>,
+        timed_gadgets::TRandom<'a>,
         #[derivative(PartialOrd = "ignore")]
         #[derivative(Ord = "ignore")]
         #[derivative(PartialEq = "ignore")]
@@ -283,7 +283,11 @@ impl<'a> fmt::Display for CompError<'a> {
                     random.0, random.1
                 )?;
                 for ((sg, port), trace) in uses.iter() {
-                    writeln!(f, "\tSubgadget {:?}, port {}. Trace: {:?}", sg, port, trace)?;
+                    writeln!(
+                        f,
+                        "\tSubgadget {:?}, random {:?}. Trace: {:?}",
+                        sg, port, trace
+                    )?;
                 }
             }
             CompErrorKind::InvalidPortDirection { attr, direction } => {

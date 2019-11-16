@@ -142,8 +142,18 @@ second is `port[d +: d]`... where `d` is the number of shares).
 + `"clock"`: The must be at most one input clock signal (whose width must be 1).
 + `"control"`: A port which is not analyzed by the tool.
 + `"random"`: Randomness input used for masked gadgets.
-Each randomness port must have a `psim_latency` attribute, except for the
-top-level module, for which it is inferred.
+Each randomness port must specify its latency, this is done by first splitting
+the input into contiguous chunks of bits (starting at bit 0), where the size of
+chunk `i` is `psim_rnd_count_{i}`.
+The number of chunks must be given in the `psim_count` attribute.
+The latency for chunk `i` is given in attribute `psim_rnd_lat_{i}`.
+Chunks may be valid at more than one clock cycle. This is specified by
+using the `psim_rnd_lats_{i}` attribute in place of the `psim_rnd_lat_{i}` attribute;
+the semantic of its value is identical to the that of the `psim_latencies`
+attribute of input sharings (see below).
+For the top-level module, all chunks and latency information may not be
+provided by setting `psim_count=0`, in which case random latencies are
+inferred.
 
 *Latency specification.* The latency is given for input and output sharings and
 randomness in number of clock cycles.

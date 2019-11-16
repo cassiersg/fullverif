@@ -33,7 +33,7 @@ pub struct Gadget<'a> {
     pub clock: Option<&'a str>,
     pub inputs: HashMap<Sharing<'a>, Latencies>,
     pub outputs: HashMap<Sharing<'a>, Latency>,
-    pub randoms: HashMap<Random<'a>, Option<Latency>>,
+    pub randoms: HashMap<Random<'a>, Option<Latencies>>,
     pub prop: GadgetProp,
     pub strat: GadgetStrat,
     pub order: u32,

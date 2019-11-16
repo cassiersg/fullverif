@@ -6,7 +6,8 @@ use crate::netlist;
 use std::collections::{HashMap, HashSet};
 
 pub type Name<'a> = (GName<'a>, Latency);
-pub type TRandom<'a> = (RndConnection<'a>, Latency);
+pub type TRndConnection<'a> = (RndConnection<'a>, Latency);
+pub type TRandom<'a> = (gadgets::Random<'a>, Latency);
 type TSharing<'a> = (Sharing<'a>, Latency);
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -22,7 +23,7 @@ pub enum TConnection<'a> {
 pub struct TGadgetInstance<'a, 'b> {
     pub base: gadget_internals::GadgetInstance<'a, 'b>,
     pub input_connections: HashMap<Input<'a>, TConnection<'a>>,
-    pub random_connections: HashMap<gadgets::Random<'a>, TRandom<'a>>,
+    pub random_connections: HashMap<TRandom<'a>, TRndConnection<'a>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -113,16 +114,23 @@ fn time_random<'a, 'b>(
     random_name: &gadgets::Random<'a>,
     sgi: &gadget_internals::GadgetInstance<'a, 'b>,
     cycle: Latency,
-) -> Result<TRandom<'a>, CompError<'a>> {
-    let random_lat = sgi.kind.randoms[random_name].ok_or_else(|| {
+) -> Result<Vec<(TRandom<'a>, TRndConnection<'a>)>, CompError<'a>> {
+    let random_lats = sgi.kind.randoms[random_name].as_ref().ok_or_else(|| {
         CompError::ref_sn(
             sgi.kind.module,
             &random_name.port_name,
             CompErrorKind::MissingAnnotation("psim_lat".to_owned()),
         )
     })?;
-    let new_cycle = random_lat + cycle;
-    Ok((sgi.random_connections[random_name], new_cycle))
+    Ok(random_lats
+        .iter()
+        .map(|lat| {
+            (
+                (*random_name, *lat),
+                (sgi.random_connections[random_name], lat + cycle),
+            )
+        })
+        .collect())
 }
 
 pub fn unroll_gadget<'a, 'b>(
@@ -157,10 +165,14 @@ pub fn unroll_gadget<'a, 'b>(
                     .flatten()
                     .collect::<HashMap<_, _>>(),
                 random_connections: sgi
-                    .random_connections
+                    .kind
+                    .randoms
                     .keys()
-                    .map(|r_name| Ok((*r_name, time_random(r_name, sgi, cycle)?)))
-                    .collect::<Result<HashMap<_, _>, _>>()?,
+                    .map(|r_name| Ok(time_random(r_name, sgi, cycle)?.into_iter()))
+                    .collect::<Result<Vec<_>, _>>()? // simplifies error handling
+                    .into_iter()
+                    .flatten()
+                    .collect::<HashMap<_, _>>(),
             };
             Ok((new_name, instance))
         })
@@ -508,9 +520,9 @@ pub fn check_all_inputs_exist(urgi: &UnrolledGadgetInternals) -> bool {
 fn random_to_input<'a, 'b>(
     internals: &gadget_internals::GadgetInternals<'a, 'b>,
     controls: &mut clk_vcd::ModuleControls,
-    trandom: &TRandom<'a>,
+    trandom: &TRndConnection<'a>,
     sg_name: &Name<'a>,
-    rnd_name: &gadgets::Random<'a>,
+    rnd_name: &TRandom<'a>,
     names_cache: &mut HashMap<&'a str, (&'a str, usize)>,
 ) -> Result<
     (
@@ -535,7 +547,7 @@ fn random_to_input<'a, 'b>(
             (RndConnection::Gate(gate_id), cycle) => match &internals.rnd_gates[&gate_id] {
                 gadget_internals::RndGate::Reg { input: new_conn } => {
                     if *cycle == 0 {
-                        return Err(CompError::ref_nw(module, CompErrorKind::Other(format!("Randomness for random {} of gadget {:?} comes from a cycle before cycle 0 (through reg {:?})", rnd_name, sg_name, gate_id))));
+                        return Err(CompError::ref_nw(module, CompErrorKind::Other(format!("Randomness for random {:?} of gadget {:?} comes from a cycle before cycle 0 (through reg {:?})", rnd_name, sg_name, gate_id))));
                     }
                     (*new_conn, cycle - 1)
                 }
@@ -572,10 +584,9 @@ fn random_to_input<'a, 'b>(
 pub fn randoms_input_timing<'b, 'a: 'b, 'c>(
     urgi: &'b UnrolledGadgetInternals<'a, 'c>,
     controls: &mut clk_vcd::ModuleControls,
-) -> Result<HashMap<(gadgets::Random<'a>, Latency), (Name<'a>, gadgets::Random<'a>)>, CompErrors<'a>>
-{
+) -> Result<HashMap<(gadgets::Random<'a>, Latency), (Name<'a>, TRandom<'a>)>, CompErrors<'a>> {
     let mut res =
-        HashMap::<(gadgets::Random<'a>, gadgets::Latency), (Name<'a>, gadgets::Random<'a>)>::new();
+        HashMap::<(gadgets::Random<'a>, gadgets::Latency), (Name<'a>, TRandom<'a>)>::new();
     let mut traces = HashMap::<
         (gadgets::Random, gadgets::Latency),
         Vec<(RndConnection, gadgets::Latency)>,
