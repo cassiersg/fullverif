@@ -4,9 +4,11 @@ use crate::gadget_internals::Connection;
 use crate::gadget_internals::{self, GName, RndConnection};
 use crate::gadgets::{self, Latency};
 use crate::netlist;
-use crate::timed_gadgets;
+use crate::tg_graph;
 use std::collections::HashMap;
 use yosys_netlist_json as yosys;
+
+pub type CResult<'a, T> = Result<T, CompErrors<'a>>;
 
 #[derive(Debug, Clone, Derivative)]
 #[derivative(PartialEq, PartialOrd, Ord, Eq)]
@@ -32,22 +34,6 @@ pub struct CompError<'a> {
 pub enum CompErrorKind<'a> {
     Other(String),
     MultipleSourceSharing(Vec<Connection<'a>>),
-    MixedValidity {
-        validities: Vec<(
-            (gadgets::Sharing<'a>, Latency),
-            timed_gadgets::Validity,
-            Vec<Latency>,
-        )>,
-        subgadget: timed_gadgets::Name<'a>,
-        #[derivative(PartialOrd = "ignore")]
-        #[derivative(Ord = "ignore")]
-        #[derivative(PartialEq = "ignore")]
-        input_connections: HashMap<(gadgets::Sharing<'a>, Latency), timed_gadgets::TConnection<'a>>,
-        #[derivative(PartialOrd = "ignore")]
-        #[derivative(Ord = "ignore")]
-        #[derivative(PartialEq = "ignore")]
-        gadgets_validity: HashMap<timed_gadgets::Name<'a>, timed_gadgets::Validity>,
-    },
     MissingSourceSharing {
         subgadget: GName<'a>,
         sharing: gadgets::Sharing<'a>,
@@ -60,7 +46,7 @@ pub enum CompErrorKind<'a> {
     MultipleUseRandom {
         random: (gadgets::Random<'a>, gadgets::Latency),
         uses: Vec<(
-            (timed_gadgets::Name<'a>, timed_gadgets::TRandom<'a>),
+            (tg_graph::Name<'a>, tg_graph::TRandom<'a>),
             Vec<(RndConnection<'a>, gadgets::Latency)>,
         )>,
     },
@@ -86,9 +72,9 @@ pub enum CompErrorKind<'a> {
     LateOutput(Latency, String, gadgets::Sharing<'a>),
     BadShareUse(Connection<'a>, String, String, usize),
     InvalidRandom(
-        Vec<timed_gadgets::TRndConnection<'a>>,
-        timed_gadgets::Name<'a>,
-        timed_gadgets::TRandom<'a>,
+        Vec<tg_graph::TRndConnection<'a>>,
+        tg_graph::Name<'a>,
+        tg_graph::TRandom<'a>,
         #[derivative(PartialOrd = "ignore")]
         #[derivative(Ord = "ignore")]
         #[derivative(PartialEq = "ignore")]
@@ -111,7 +97,7 @@ impl<'a> fmt::Display for ASrc<'a> {
 }
 
 #[derive(Debug, Clone)]
-pub struct CompErrors<'a>(Vec<CompError<'a>>);
+pub struct CompErrors<'a>(pub Vec<CompError<'a>>);
 
 impl<'a> CompErrors<'a> {
     pub fn new(mut errors: Vec<CompError<'a>>) -> Self {
@@ -215,44 +201,6 @@ impl<'a> fmt::Display for CompError<'a> {
                         ),
                     };
                     writeln!(f, "{} (at line {})", source, src_a)?;
-                }
-            }
-            CompErrorKind::MixedValidity {
-                validities,
-                subgadget,
-                input_connections,
-                gadgets_validity,
-            } => {
-                writeln!(
-                    f,
-                    "Mixing valid and invalid inputs for sub-gadget '{}' at {}, for cycle {}.",
-                    subgadget.0,
-                    ASrc(&self.module.as_ref().unwrap().cells[subgadget.0].attributes),
-                    subgadget.1
-                )?;
-                for (sharing, validity, valid_cycles) in validities.iter() {
-                    writeln!(f, "\tInput sharing {:?} is {:?}.", sharing, validity)?;
-                    writeln!(f, "\t\tNote: connection: {:?}", input_connections[sharing])?;
-                    //if validity == &timed_gadgets::Validity::Invalid {
-                    writeln!(f, "\t\tNote: input valid at cycle(s) {:?}.", valid_cycles)?;
-                    //}
-                }
-                let mut valid_cycles = HashMap::new();
-                for ((name, cycle), val) in gadgets_validity.iter() {
-                    if val == &timed_gadgets::Validity::Valid {
-                        valid_cycles
-                            .entry(*name)
-                            .or_insert_with(Vec::new)
-                            .push(cycle);
-                    }
-                }
-                for (name, val_cycles) in valid_cycles.iter_mut() {
-                    val_cycles.sort_unstable();
-                    writeln!(
-                        f,
-                        "\tNote: Gadget {} valid at cycles {:?}.",
-                        name, val_cycles
-                    )?;
                 }
             }
             CompErrorKind::MissingSourceSharing {

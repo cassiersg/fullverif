@@ -2,7 +2,7 @@
 extern crate derivative;
 //use itertools::Itertools;
 use crate::error::{CompError, CompErrorKind, CompErrors};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{prelude::*, BufReader};
 use yosys_netlist_json as yosys;
@@ -21,8 +21,11 @@ mod gadgets;
 mod inner_affine;
 mod netlist;
 mod tg_graph;
-mod timed_gadgets;
 mod utils;
+
+use crate::error::CResult;
+use crate::gadgets::Latency;
+use crate::utils::format_set;
 
 #[cfg(feature = "flame_it")]
 mod cflame {
@@ -35,13 +38,46 @@ mod cflame {
     pub fn end(_x: &str) {}
 }
 
+// rnd_timings to map: port -> offsets for each cycle
+pub fn abstract_rnd_timings<'a>(
+    rnd_timings: impl Iterator<Item = &'a (gadgets::Random<'a>, Latency)>,
+) -> Vec<HashMap<&'a str, Vec<usize>>> {
+    let mut res = Vec::new();
+    for (rnd, lat) in rnd_timings {
+        if res.len() <= *lat as usize {
+            res.resize(*lat as usize + 1, HashMap::new());
+        }
+        res[*lat as usize]
+            .entry(rnd.port_name)
+            .or_insert_with(Vec::new)
+            .push(rnd.offset as usize);
+    }
+    res
+}
+
+pub fn rnd_timing_disp<'a>(
+    rnd_timings: impl Iterator<Item = &'a (gadgets::Random<'a>, Latency)>,
+) -> Vec<Vec<(&'a str, String)>> {
+    abstract_rnd_timings(rnd_timings)
+        .into_iter()
+        .map(|t| {
+            let mut res = t
+                .into_iter()
+                .map(|(rnd, offsets)| (rnd, crate::utils::format_set(offsets.into_iter())))
+                .collect::<Vec<_>>();
+            res.sort_unstable();
+            res
+        })
+        .collect()
+}
+
 #[cfg_attr(feature = "flame_it", flame)]
 fn check_gadget<'a, 'b>(
     gadgets: &'b gadgets::Gadgets<'a>,
     gadget_name: gadgets::GKind<'a>,
     check_state_cleared: bool,
     controls: &mut clk_vcd::ModuleControls,
-) -> Result<Option<timed_gadgets::UnrolledGadgetInternals<'a, 'b>>, CompErrors<'a>> {
+) -> CResult<'a, Option<tg_graph::AUGIGraph<'a, 'b>>> {
     let gadget = &gadgets[gadget_name];
     match gadget.strat {
         netlist::GadgetStrat::Assumed => Ok(None),
@@ -82,102 +118,42 @@ fn check_gadget<'a, 'b>(
             let n_cycles = std::cmp::min(n_cycles, max_delay_output + 2);
             println!("final n_cycles: {}", n_cycles);
             println!("Loaded simulation states.");
-            let unrolled_gadget = timed_gadgets::unroll_gadget(
-                gadget,
-                gadget_internals.clone(),
-                n_cycles,
-                &gadget_name,
-            )?;
             println!("to graph...");
-            //let graph = tg_graph::UGIGraph::from_urgi(&unrolled_gadget);
             let graph = tg_graph::UGIGraph::unroll(gadget_internals.clone(), n_cycles)?;
-            println!("to urgi...");
-            let urgi = graph.to_urgi();
-            println!("urgi done");
             let _a_graph = graph.annotate(controls)?;
             println!("annotation done");
-            assert_eq!(&urgi, &unrolled_gadget);
-            println!("Unrolled gadget.");
-            let unrolled_gadget = timed_gadgets::simplify_muxes(unrolled_gadget, controls)?;
-            println!("Mux simplified.");
-            let unrolled_gadget = timed_gadgets::do_not_compute_invalid(unrolled_gadget)?;
-            println!("Removed invalid computations");
-            println!("Gadgets:");
-            for (g, c) in timed_gadgets::list_gadgets(&unrolled_gadget) {
-                println!("\t{}: {}", g, c);
+            if false {
+                _a_graph.disp_full();
             }
-            if true {
-                if false {
-                    _a_graph.disp_full();
-                }
-                let l1 = timed_gadgets::list_gadgets_inner(&unrolled_gadget);
-                let l2 = _a_graph.list_valid();
-                let l3 = _a_graph.list_sensitive();
-                let mut l1_k = l1.keys().collect::<Vec<_>>();
-                l1_k.sort_unstable();
-                let mut l2_k = l2.keys().collect::<Vec<_>>();
-                l2_k.sort_unstable();
-                let mut l3_k = l3.keys().collect::<Vec<_>>();
-                l3_k.sort_unstable();
-                let mut bad = false;
-                for k in l3_k {
-                    for x in l3[k].iter() {
-                        if !l1[k].contains(x) {
-                            println!(
-                                "wrong gadget, k: {:?}, x: {:?}, l3: {:?}, l1: {:?}, l2: {:?}",
-                                k, x, l3[k], l1[k], l2[k],
-                            );
-                            bad = true;
-                        }
-                    }
-                }
-                if bad {
-                    panic!("wrong gadget(s)");
-                }
-                for k in l1_k {
-                    for x in l1[k].iter() {
-                        assert!(
-                            l2[k].contains(x),
-                            "k: {:?}, x: {:?}, l1: {:?}, l2: {:?}",
-                            k,
-                            x,
-                            l1[k],
-                            l2[k]
-                        );
-                    }
-                }
+            println!("Valid gadgets:");
+            for (g, c) in _a_graph.list_valid() {
+                println!("\t{}: {}", g, format_set(c.into_iter()));
             }
-            timed_gadgets::check_valid_outputs(&unrolled_gadget)?;
+            println!("Sensitive gadgets:");
+            for (g, c) in _a_graph.list_sensitive() {
+                println!("\t{}: {}", g, format_set(c.into_iter()));
+            }
             _a_graph.check_valid_outputs()?;
             println!("Outputs valid: ok.");
-            // This is only a self-check, should never fail
-            assert!(timed_gadgets::check_all_inputs_exist(&unrolled_gadget));
             println!("Inputs exist.");
-            let rnd_times = timed_gadgets::randoms_input_timing(&unrolled_gadget, controls)?;
             for name in _a_graph.warn_useless_rnd() {
                 println!("Warning: the gadget {:?} is not valid, although it has sensitive inputs and then requiring fresh randomness. If you didn't mean for it to be valid, consider muxing the inputs in order to make them non-sensitive when you don't use the gadget.", name);
             }
             let _rnd_times2 = _a_graph.randoms_input_timing(controls)?;
-            assert_eq!(_rnd_times2, rnd_times);
             println!("Randoms timed");
             println!("rnd_times:");
-            for (i, times) in timed_gadgets::rnd_timing_disp(rnd_times.keys())
-                .into_iter()
-                .enumerate()
-            {
+            for (i, times) in rnd_timing_disp(_rnd_times2.keys()).into_iter().enumerate() {
                 println!("Cycle {}:", i);
                 for (rnd, offsets) in times {
                     println!("\t{}: {}", rnd, offsets);
                 }
             }
             if check_state_cleared {
-                timed_gadgets::check_state_cleared(&unrolled_gadget, n_cycles)?;
                 _a_graph.check_state_cleared()?;
             }
-            comp_prop::check_sec_prop(&unrolled_gadget, gadget)?;
             comp_prop::check_sec_prop2(&_a_graph)?;
             println!("check successful for gadget {}", gadget_name);
-            Ok(Some(unrolled_gadget))
+            Ok(Some(_a_graph))
         }
     }
 }
@@ -239,8 +215,8 @@ fn check_gadget2<'a>(
         .into());
     }
 
-    let unrolled_gadget = check_gadget(&gadgets, gadget_name, check_state_cleared, &mut controls)?;
-    let unrolled_gadget = if let Some(x) = unrolled_gadget {
+    let g_graph = check_gadget(&gadgets, gadget_name, check_state_cleared, &mut controls)?;
+    let g_graph = if let Some(x) = g_graph {
         x
     } else {
         println!("Gadget is assumed to be correct");
@@ -248,9 +224,10 @@ fn check_gadget2<'a>(
     };
 
     let mut gadgets_to_check: Vec<(&str, _)> = Vec::new();
-    for ((name, cycle), tgi) in unrolled_gadget.subgadgets.iter() {
-        let gadget_name = tgi.base.kind.name;
-        let controls = controls.submodule((*name).to_owned(), *cycle as usize);
+    // FIXME Should also check "only glitch" gadgets
+    for ((name, cycle), base) in g_graph.sensitive_gadgets() {
+        let gadget_name = base.kind.name;
+        let controls = controls.submodule((*name).to_owned(), cycle as usize);
         gadgets_to_check.push((gadget_name, controls));
     }
     let mut gadgets_checked: HashMap<String, Vec<clk_vcd::StateLookups>> = HashMap::new();
@@ -271,10 +248,11 @@ fn check_gadget2<'a>(
 
         let ur_sg = check_gadget(&gadgets, sg_name, check_state_cleared, &mut sg_controls)?;
         if let Some(ur_sg) = ur_sg {
-            for ((name, cycle), tgi) in ur_sg.subgadgets.iter() {
+            // Should also check "only glitch" gadgets
+            for ((name, cycle), base) in ur_sg.sensitive_gadgets() {
                 gadgets_to_check.push((
-                    tgi.base.kind.name,
-                    sg_controls.submodule((*name).to_owned(), *cycle as usize),
+                    base.kind.name,
+                    sg_controls.submodule((*name).to_owned(), cycle as usize),
                 ));
             }
         }
