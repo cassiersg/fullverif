@@ -15,8 +15,6 @@ use std::collections::{BinaryHeap, HashMap, HashSet};
 
 type RndTrace<'a> = Vec<(RndConnection<'a>, gadgets::Latency)>;
 
-//struct TSharing<'a> { sh: Sharing<'a>, lat: Latency, }
-
 #[derive(Debug, Clone)]
 struct TGadget<'a, 'b> {
     base: gadget_internals::GadgetInstance<'a, 'b>,
@@ -61,7 +59,7 @@ pub struct UGIGraph<'a, 'b, E = Edge<'a>> {
     i_nodes: Vec<petgraph::graph::NodeIndex>,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Sensitive {
     No,
     Glitch,
@@ -128,7 +126,6 @@ impl<'a, 'b, E> UGIGraph<'a, 'b, E> {
         for (idx, tginst) in self.gadgets.node_references() {
             if let TGInst::Gadget(gadget) = tginst {
                 if gadget.base.kind.prop == netlist::GadgetProp::Mux {
-                    // FIXME parmeterize
                     let sel_name = "sel".to_owned();
                     let path: Vec<String> = vec![(gadget.name).to_owned(), sel_name.to_owned()];
                     let sel = controls
@@ -435,7 +432,7 @@ impl<'a, 'b> UGIGraph<'a, 'b> {
         sorted_nodes: &[NodeIndex],
     ) -> Result<(Vec<bool>, Vec<Sensitive>), CompError<'a>> {
         let mut edges_valid: Vec<Option<bool>> = vec![None; self.gadgets.edge_count()];
-        let mut edges_sensitive: Vec<Option<bool>> = vec![None; self.gadgets.edge_count()];
+        let mut edges_sensitive: Vec<Option<Sensitive>> = vec![None; self.gadgets.edge_count()];
         println!("annotation...");
         for idx in sorted_nodes.into_iter() {
             match &self.gadgets[*idx] {
@@ -465,8 +462,9 @@ impl<'a, 'b> UGIGraph<'a, 'b> {
                             for e_i in self.g_inputs(*idx) {
                                 let Sharing { pos, .. } = &(e_i.weight().1).0;
                                 let output = outputs[*pos as usize].unwrap();
-                                *edges_sensitive[output].get_or_insert(false) |=
-                                    edges_sensitive[e_i.id().index()].unwrap();
+                                let sens_new = edges_sensitive[e_i.id().index()].unwrap();
+                                let sens = edges_sensitive[output].get_or_insert(Sensitive::No);
+                                *sens = (*sens).max(sens_new);
                             }
                         }
                     } else {
@@ -483,7 +481,7 @@ impl<'a, 'b> UGIGraph<'a, 'b> {
                                 );
                             }
                         });
-                        let g_sensitive = self.g_inputs(*idx).any(|e| {
+                        let g_sensitive = self.g_inputs(*idx).map(|e| {
                             if let Some(v) = edges_sensitive[e.id().index()] {
                                 v
                             } else {
@@ -495,7 +493,7 @@ impl<'a, 'b> UGIGraph<'a, 'b> {
                                     e, name, lat, id_self, id_src
                                 );
                             }
-                        });
+                        }).max().unwrap_or(Sensitive::No);
                         for e in self.g_outputs(*idx) {
                             edges_valid[e.id().index()] = Some(g_valid);
                             edges_sensitive[e.id().index()] = Some(g_sensitive);
@@ -505,20 +503,25 @@ impl<'a, 'b> UGIGraph<'a, 'b> {
                 TGInst::Input(lat) => {
                     for e in self.g_outputs(*idx) {
                         let (src_sharing, _) = e.weight();
-                        let res = Some(self.internals.gadget.inputs[src_sharing].contains(&lat));
-                        edges_valid[e.id().index()] = res;
-                        // Might want to be more conservative
-                        edges_sensitive[e.id().index()] = res;
+                        let valid = self.internals.gadget.inputs[src_sharing].contains(&lat);
+                        edges_valid[e.id().index()] = Some(valid);
+                        // Worst-case analysis: we assume there may be glitches on the inputs.
+                        edges_sensitive[e.id().index()] = if valid {
+                            Some(Sensitive::Yes)
+                        } else {
+                            Some(Sensitive::Glitch)
+                        };
                     }
                 }
-                TGInst::Output => {}
+                TGInst::Output => {
+                    assert!(self.g_outputs(*idx).next().is_none());
+                }
                 TGInst::Invalid => {
-                    // FIXME this should not exist... (or maybe not)
+                    // Connections from non-existing gadgets or out of range inputs.
+                    // Assume that they are non-sensitive (might want to assume glitch ?)
                     for e in self.g_outputs(*idx) {
                         edges_valid[e.id().index()] = Some(false);
-                        // Not clear what to put there (depends on input assumptions), might want
-                        // to parameterize by the user.
-                        edges_sensitive[e.id().index()] = Some(false);
+                        edges_sensitive[e.id().index()] = Some(Sensitive::No);
                     }
                 }
             }
@@ -882,8 +885,13 @@ fn random_to_input<'a, 'b>(
                     let var_name = netlist::format_name(var_name);
                     match controls.lookup(vec![var_name], *cycle as usize, *offset)? {
                         None => {
-                            unimplemented!(); // TODO invalid random
-                                              //return Ok((None, trandom_w.clone()));
+                            return Err(CompError::ref_nw(
+                                module,
+                                CompErrorKind::Other(format!(
+                                    "Random comes from a late gate for gadget {:?}",
+                                    sg_name
+                                )),
+                            ));
                         }
                         Some(clk_vcd::VarState::Scalar(vcd::Value::V0)) => (*ina, *cycle),
                         Some(clk_vcd::VarState::Scalar(vcd::Value::V1)) => (*inb, *cycle),
