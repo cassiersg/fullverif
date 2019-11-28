@@ -97,12 +97,15 @@ pub enum GadgetProp {
 impl GadgetProp {
     pub fn is_pini(&self) -> bool {
         match self {
-            GadgetProp::Affine | GadgetProp::PINI => true,
+            GadgetProp::Mux | GadgetProp::Affine | GadgetProp::PINI => true,
             _ => false,
         }
     }
     pub fn is_affine(&self) -> bool {
-        *self == GadgetProp::Affine
+        match self {
+            GadgetProp::Mux | GadgetProp::Affine => true,
+            _ => false,
+        }
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -174,7 +174,9 @@ pub fn netlist2gadgets<'a>(
 
 impl<'a> Gadget<'a> {
     pub fn is_pini(&self) -> bool {
-        self.prop.is_pini() || (self.prop == netlist::GadgetProp::SNI && self.inputs.len() <= 1)
+        self.prop.is_pini()
+            || (self.prop == netlist::GadgetProp::SNI && self.inputs.len() <= 1)
+            || self.prop == netlist::GadgetProp::Mux
     }
     pub fn max_output_lat(&self) -> Latency {
         self.outputs
