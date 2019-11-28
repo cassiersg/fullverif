@@ -10,7 +10,9 @@ fn dump_flame() {}
 
 fn main() {
     match fullverif::main_wrap2() {
-        Ok(_) => {}
+        Ok(_) => {
+            println!("Fullverif: finised successfully.");
+        }
         Err(err) => {
             println!("{}", err);
         }
