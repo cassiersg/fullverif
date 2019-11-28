@@ -30,9 +30,9 @@ pub struct TGadgetInstance<'a, 'b> {
 pub struct UnrolledGadgetInternals<'a, 'b> {
     pub internals: gadget_internals::GadgetInternals<'a, 'b>,
     pub subgadgets: HashMap<Name<'a>, TGadgetInstance<'a, 'b>>,
-    output_connections: HashMap<TSharing<'a>, TConnection<'a>>,
-    inputs: HashSet<TSharing<'a>>,
-    n_cycles: Latency,
+    pub output_connections: HashMap<TSharing<'a>, TConnection<'a>>,
+    pub inputs: HashSet<TSharing<'a>>,
+    pub n_cycles: Latency,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -42,7 +42,7 @@ pub enum Validity {
     Any,
 }
 
-fn time_connection<'a, 'b>(
+pub fn time_connection<'a, 'b>(
     conn: &Connection<'a>,
     internals: &gadget_internals::GadgetInternals<'a, 'b>,
     src_latency: Latency,
@@ -73,7 +73,9 @@ fn time_connection<'a, 'b>(
             if internals.gadget.inputs[input].contains(&tsharing.1) {
                 TConnection::Input(tsharing)
             } else {
-                TConnection::Invalid(Some(Box::new(TConnection::Input(tsharing))))
+                //TConnection::Invalid(Some(Box::new(TConnection::Input(tsharing)))) // TODO
+                //restore
+                TConnection::Invalid(None)
             }
         }
     }
@@ -110,7 +112,7 @@ fn retime_connection<'a>(conn: &TConnection<'a>, cycle: Latency) -> TConnection<
     }
 }
 
-fn time_random<'a, 'b>(
+pub fn time_random<'a, 'b>(
     random_name: &gadgets::Random<'a>,
     sgi: &gadget_internals::GadgetInstance<'a, 'b>,
     cycle: Latency,
@@ -517,7 +519,7 @@ pub fn check_all_inputs_exist(urgi: &UnrolledGadgetInternals) -> bool {
 }
 
 // Returns None if input is late
-fn random_to_input<'a, 'b>(
+pub fn random_to_input<'a, 'b>(
     internals: &gadget_internals::GadgetInternals<'a, 'b>,
     controls: &mut clk_vcd::ModuleControls,
     trandom: &TRndConnection<'a>,
@@ -636,17 +638,29 @@ pub fn randoms_input_timing<'b, 'a: 'b, 'c>(
     }
 }
 
-pub fn list_gadgets<'a, 'b>(urgi: &UnrolledGadgetInternals<'a, 'b>) -> Vec<(GName<'a>, String)> {
+pub fn list_gadgets_inner<'a, 'b>(
+    urgi: &UnrolledGadgetInternals<'a, 'b>,
+) -> HashMap<GName<'a>, Vec<Latency>> {
     let mut gadgets = HashMap::new();
     for (gadget, cycle) in urgi.subgadgets.keys() {
-        gadgets
-            .entry(gadget)
-            .or_insert_with(Vec::new)
-            .push(*cycle as usize);
+        gadgets.entry(*gadget).or_insert_with(Vec::new).push(*cycle);
     }
+    for cycles in gadgets.values_mut() {
+        cycles.sort_unstable();
+    }
+    return gadgets;
+}
+
+pub fn list_gadgets<'a, 'b>(urgi: &UnrolledGadgetInternals<'a, 'b>) -> Vec<(GName<'a>, String)> {
+    let gadgets = list_gadgets_inner(urgi);
     let mut res = gadgets
         .into_iter()
-        .map(|(g, c)| (*g, crate::utils::format_set(c.into_iter())))
+        .map(|(g, c)| {
+            (
+                g,
+                crate::utils::format_set(c.into_iter().map(|x| x as usize)),
+            )
+        })
         .collect::<Vec<_>>();
     res.sort_unstable();
     res

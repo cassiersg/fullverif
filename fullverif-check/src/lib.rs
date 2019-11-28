@@ -2,7 +2,7 @@
 extern crate derivative;
 //use itertools::Itertools;
 use crate::error::{CompError, CompErrorKind, CompErrors};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{prelude::*, BufReader};
 use yosys_netlist_json as yosys;
@@ -20,6 +20,7 @@ mod gadget_internals;
 mod gadgets;
 mod inner_affine;
 mod netlist;
+mod tg_graph;
 mod timed_gadgets;
 mod utils;
 
@@ -70,10 +71,10 @@ fn check_gadget<'a, 'b>(
             let max_delay_output = gadget.max_output_lat();
             if (max_delay_output + 1 > n_cycles) && !check_state_cleared {
                 println!(
-            "Warning: not enough simulated cycles to simulate gadget {}.\nThis indicates that \
-             computation of this gadget is late with respect to the output shares.",
-            gadget_name
-        );
+                    "Warning: not enough simulated cycles to simulate gadget {}.\nThis indicates \
+                     that computation of this gadget is late with respect to the output shares.",
+                    gadget_name
+                );
                 return Ok(None);
             }
             // This should have been checked before if check_state_cleared == true
@@ -81,8 +82,21 @@ fn check_gadget<'a, 'b>(
             let n_cycles = std::cmp::min(n_cycles, max_delay_output + 2);
             println!("final n_cycles: {}", n_cycles);
             println!("Loaded simulation states.");
-            let unrolled_gadget =
-                timed_gadgets::unroll_gadget(gadget, gadget_internals, n_cycles, &gadget_name)?;
+            let unrolled_gadget = timed_gadgets::unroll_gadget(
+                gadget,
+                gadget_internals.clone(),
+                n_cycles,
+                &gadget_name,
+            )?;
+            println!("to graph...");
+            //let graph = tg_graph::UGIGraph::from_urgi(&unrolled_gadget);
+            let graph = tg_graph::UGIGraph::unroll(gadget_internals.clone(), n_cycles)?;
+            println!("to urgi...");
+            let urgi = graph.to_urgi();
+            println!("urgi done");
+            let _a_graph = graph.annotate(controls)?;
+            println!("annotation done");
+            assert_eq!(&urgi, &unrolled_gadget);
             println!("Unrolled gadget.");
             let unrolled_gadget = timed_gadgets::simplify_muxes(unrolled_gadget, controls)?;
             println!("Mux simplified.");
@@ -92,12 +106,59 @@ fn check_gadget<'a, 'b>(
             for (g, c) in timed_gadgets::list_gadgets(&unrolled_gadget) {
                 println!("\t{}: {}", g, c);
             }
+            if true {
+                if false {
+                    _a_graph.disp_full();
+                }
+                let l1 = timed_gadgets::list_gadgets_inner(&unrolled_gadget);
+                let l2 = _a_graph.list_valid();
+                let l3 = _a_graph.list_sensitive();
+                let mut l1_k = l1.keys().collect::<Vec<_>>();
+                l1_k.sort_unstable();
+                let mut l2_k = l2.keys().collect::<Vec<_>>();
+                l2_k.sort_unstable();
+                let mut l3_k = l3.keys().collect::<Vec<_>>();
+                l3_k.sort_unstable();
+                let mut bad = false;
+                for k in l3_k {
+                    for x in l3[k].iter() {
+                        if !l1[k].contains(x) {
+                            println!(
+                                "wrong gadget, k: {:?}, x: {:?}, l3: {:?}, l1: {:?}, l2: {:?}",
+                                k, x, l3[k], l1[k], l2[k],
+                            );
+                            bad = true;
+                        }
+                    }
+                }
+                if bad {
+                    panic!("wrong gadget(s)");
+                }
+                for k in l1_k {
+                    for x in l1[k].iter() {
+                        assert!(
+                            l2[k].contains(x),
+                            "k: {:?}, x: {:?}, l1: {:?}, l2: {:?}",
+                            k,
+                            x,
+                            l1[k],
+                            l2[k]
+                        );
+                    }
+                }
+            }
             timed_gadgets::check_valid_outputs(&unrolled_gadget)?;
+            _a_graph.check_valid_outputs()?;
             println!("Outputs valid: ok.");
             // This is only a self-check, should never fail
             assert!(timed_gadgets::check_all_inputs_exist(&unrolled_gadget));
             println!("Inputs exist.");
             let rnd_times = timed_gadgets::randoms_input_timing(&unrolled_gadget, controls)?;
+            for name in _a_graph.warn_useless_rnd() {
+                println!("Warning: the gadget {:?} is not valid, although it has sensitive inputs and then requiring fresh randomness. If you didn't mean for it to be valid, consider muxing the inputs in order to make them non-sensitive when you don't use the gadget.", name);
+            }
+            let _rnd_times2 = _a_graph.randoms_input_timing(controls)?;
+            assert_eq!(_rnd_times2, rnd_times);
             println!("Randoms timed");
             println!("rnd_times:");
             for (i, times) in timed_gadgets::rnd_timing_disp(rnd_times.keys())
@@ -111,8 +172,10 @@ fn check_gadget<'a, 'b>(
             }
             if check_state_cleared {
                 timed_gadgets::check_state_cleared(&unrolled_gadget, n_cycles)?;
+                _a_graph.check_state_cleared()?;
             }
             comp_prop::check_sec_prop(&unrolled_gadget, gadget)?;
+            comp_prop::check_sec_prop2(&_a_graph)?;
             println!("check successful for gadget {}", gadget_name);
             Ok(Some(unrolled_gadget))
         }

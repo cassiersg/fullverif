@@ -26,6 +26,7 @@ impl<'a> Sharing<'a> {
     }
 }
 
+// Invariant: all output latencies are >= input and randomness latencies
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Gadget<'a> {
     pub name: &'a str,
@@ -150,6 +151,7 @@ fn module2gadget<'a>(
     if res.outputs.is_empty() {
         return Err(CompError::ref_nw(module, CompErrorKind::NoOutput));
     }
+    res.output_lat_ok()?;
     Ok(Some(res))
 }
 
@@ -184,5 +186,21 @@ impl<'a> Gadget<'a> {
     pub fn sharing_bits(&self, sharing: Sharing<'a>) -> &'a [yosys::BitVal] {
         &self.module.ports[sharing.port_name].bits[(sharing.pos * self.order) as usize..]
             [..self.order as usize]
+    }
+    fn output_lat_ok(&self) -> Result<(), CompError<'a>> {
+        let min_o_lat = self.outputs.values().cloned().max().unwrap();
+        let inputs_lats = self.inputs.values().flat_map(|x| x.iter());
+        let randoms_lats = self
+            .randoms
+            .values()
+            .filter_map(|x| x.as_ref())
+            .flat_map(|x| x.iter());
+        let max_in_lat = inputs_lats.chain(randoms_lats).copied().min();
+        if let Some(max_in_lat) = max_in_lat {
+            if max_in_lat > min_o_lat {
+                return Err(CompError::ref_nw(self.module, CompErrorKind::EarlyOutput));
+            }
+        }
+        return Ok(());
     }
 }

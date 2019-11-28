@@ -82,6 +82,7 @@ pub enum CompErrorKind<'a> {
     ConflictingAnnotations(String, String),
     WrongWireWidth(u32, u32),
     NoOutput,
+    EarlyOutput,
     LateOutput(Latency, String, gadgets::Sharing<'a>),
     BadShareUse(Connection<'a>, String, String, usize),
     InvalidRandom(
@@ -323,6 +324,12 @@ impl<'a> fmt::Display for CompError<'a> {
             }
             CompErrorKind::NoOutput => {
                 writeln!(f, "Gadget has no output sharing (at least 1 is required).",)?;
+            }
+            CompErrorKind::EarlyOutput => {
+                writeln!(
+                    f,
+                    "Gadget has valid output sharing before last input sharing or random.",
+                )?;
             }
             CompErrorKind::LateOutput(lateness, sg, output) => {
                 writeln!(
