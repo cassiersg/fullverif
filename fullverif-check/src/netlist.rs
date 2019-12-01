@@ -1,20 +1,15 @@
+//! Parsing and basing analysis of yosys JSON netlist:
+//! fullverif attributes parsing and misc functions.
+
 use crate::error::{CompError, CompErrorKind};
 use crate::gadgets::{self, Latency};
 use itertools::Itertools;
 use std::convert::TryInto;
 use yosys_netlist_json as yosys;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct Net {
-    wire_name: String,
-    wire_index: usize,
-}
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct Sharing {
-    gadget_index: usize,
-    gadget_output: String,
-}
-
+/// Return the attribute `attr` on the net `netname` in `module` as an in.
+/// If the attribute is not present, return None.
+/// If it has not the correct type (or overflows), return and Err.
 fn get_int_attr<'a>(
     module: &yosys::Module,
     netname: &str,
@@ -36,6 +31,7 @@ fn get_int_attr<'a>(
     }
 }
 
+/// See get_int_attr but returns Err if the attribute is not present.
 fn get_int_attr_needed<'a>(
     module: &yosys::Module,
     netname: &str,
@@ -45,12 +41,17 @@ fn get_int_attr_needed<'a>(
         .ok_or_else(|| CompError::missing_annotation(module, netname, attr))
 }
 
+/// Gen the attribute `attr` on netname in module.
+/// The attribute should be an arbitrary-length bit vector (i.e., any int).
+/// We return the result as a LE bit Vec<bool>
 fn get_bitstring_attr<'a>(
     module: &yosys::Module,
     netname: &str,
     attr: &str,
 ) -> Result<Option<Vec<bool>>, CompError<'a>> {
     if let Some(attr_v) = module.netnames[netname].attributes.get(attr) {
+        // We have to handle the string attribute case since this is how
+        // yosys encodes ints with more than 32 bits.
         match attr_v {
             yosys::AttributeVal::N(x) => {
                 Ok(Some((0..32).map(|i| ((*x >> i) & 0x1) == 0x1).collect()))
@@ -75,6 +76,7 @@ fn get_bitstring_attr<'a>(
     }
 }
 
+/// Fullverif type for a wire
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum WireAttrs {
     Sharing {
@@ -85,6 +87,8 @@ pub enum WireAttrs {
     Control,
     Clock,
 }
+
+/// Fullverif security property for a module gadget.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GadgetProp {
     Mux,
@@ -108,6 +112,8 @@ impl GadgetProp {
         }
     }
 }
+
+/// Fullverif strategy for proving security of a gadget.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GadgetStrat {
     Assumed,
@@ -115,6 +121,7 @@ pub enum GadgetStrat {
     Isolate,
 }
 
+/// Get values for the latency annotation of a port.
 fn get_latencies<'a>(
     module: &yosys::Module,
     netname: &str,
@@ -145,6 +152,7 @@ fn get_latencies<'a>(
     return Ok(latencies);
 }
 
+/// Get the type of a port.
 pub fn net_attributes<'a>(
     module: &yosys::Module,
     netname: &str,
@@ -203,6 +211,8 @@ pub fn net_attributes<'a>(
     }
 }
 
+/// Get the security property annotation of a module.
+/// Returns None if not specified, Err if invalid.
 pub fn module_prop<'a>(module: &yosys::Module) -> Result<Option<GadgetProp>, CompError<'a>> {
     module
         .attributes
@@ -222,6 +232,8 @@ pub fn module_prop<'a>(module: &yosys::Module) -> Result<Option<GadgetProp>, Com
         .transpose()
 }
 
+/// Get the security proof strategy for the module.
+/// Returns Err if the annotation is invalid of missing.
 pub fn module_strat<'a>(module: &yosys::Module) -> Result<GadgetStrat, CompError<'a>> {
     match module.attributes.get("psim_strat").ok_or_else(|| {
         CompError::ref_nw(
@@ -239,6 +251,8 @@ pub fn module_strat<'a>(module: &yosys::Module) -> Result<GadgetStrat, CompError
     }
 }
 
+/// Get the masking number of shares of a module.
+/// Returns Err if the annotation is invalid of missing.
 pub fn module_order<'a>(module: &yosys::Module) -> Result<u32, CompError<'a>> {
     match module.attributes.get("psim_order").ok_or_else(|| {
         CompError::ref_nw(

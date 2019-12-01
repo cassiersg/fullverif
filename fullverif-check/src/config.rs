@@ -1,3 +1,5 @@
+//! Command-line parsing for the app.
+
 use clap::{App, Arg};
 
 #[derive(Debug, Clone)]
@@ -13,10 +15,10 @@ pub struct Config {
 }
 
 pub fn parse_cmd_line() -> Config {
-    let matches = App::new("Masksim-comp")
+    let matches = App::new("fullverif")
         .version("0.1")
         .author("Gaëtan Cassiers <gaetan.cassiers@uclouvain.be>")
-        //.about("Does awesome things")
+        .about("Composition-based verification of masked hardware circuits.")
         .arg(
             Arg::with_name("json")
                 .long("json")

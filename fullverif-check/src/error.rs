@@ -1,3 +1,10 @@
+//! Error types for the app.
+//! CompError is the general error type, which as some generic attributes, and a CompErrorKind
+//! attrivute.
+//! CompErrorKind is an enum that conveys information about the type of error (and details).
+//! CompErrors is an Error type containing multiple CompError. We use it to report multiple errors
+//! to the user at once.
+
 use std::fmt;
 
 use crate::gadget_internals::Connection;
@@ -82,7 +89,6 @@ pub enum CompErrorKind<'a> {
     ),
     OutputNotValid(Vec<(gadgets::Sharing<'a>, Latency)>),
     ExcedentaryOutput(Vec<(gadgets::Sharing<'a>, Latency)>),
-    ConstantShare(String, gadgets::Sharing<'a>, u32),
     Vcd,
 }
 
@@ -193,9 +199,9 @@ impl<'a> fmt::Display for CompError<'a> {
                 writeln!(f, "Multiple sources for net:")?;
                 for source in sources.iter() {
                     let src_a = match source {
-                        Connection::GadgetOutput { gadget_name, .. } => {
-                            ASrc(&self.module.as_ref().unwrap().cells[*gadget_name].attributes)
-                        }
+                        Connection::GadgetOutput { gadget_name, .. } => ASrc(
+                            &self.module.as_ref().unwrap().cells[*gadget_name.get()].attributes,
+                        ),
                         Connection::Input(sharing) => ASrc(
                             &self.module.as_ref().unwrap().netnames[sharing.port_name].attributes,
                         ),
@@ -309,16 +315,6 @@ impl<'a> fmt::Display for CompError<'a> {
                     writeln!(f, "\tOutput {} at cycle {}", sharing, cycle)?;
                 }
             }
-            CompErrorKind::ConstantShare(sub_gadget, sharing, index) => {
-                write!(
-                    f,
-                    "Bit {} of sharing {} of sub-gadget {} is a constant value, while \
-                     it should be part of a valid sharing (either output of a gadget or \
-                     input sharing.\n\tHint: if you need constants in the algorithm, \
-                     use a gadget that shares a constant.\n",
-                    index, sharing, sub_gadget
-                )?;
-            }
             CompErrorKind::Vcd => {
                 writeln!(f, "Error in the format of the vcd file.")?;
             }
@@ -337,7 +333,7 @@ impl<'a> fmt::Display for gadget_internals::RndConnection<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             gadget_internals::RndConnection::Port(rnd) => write!(f, "port:{}", rnd),
-            gadget_internals::RndConnection::Gate((gn, goff)) => write!(f, "gate:{}[{}]", gn, goff),
+            gadget_internals::RndConnection::Gate(gate) => write!(f, "gate:{}", gate),
             gadget_internals::RndConnection::Invalid(bit) => {
                 write!(f, "invalid(non-random, bit {:?})", bit)
             }

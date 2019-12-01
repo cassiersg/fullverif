@@ -1,16 +1,18 @@
-#[macro_use]
-extern crate derivative;
-//use itertools::Itertools;
-use crate::error::{CompError, CompErrorKind, CompErrors};
+use crate::error::{CResult, CompError, CompErrorKind, CompErrors};
+use crate::gadget_internals::GadgetInternals;
+use crate::gadgets::Latency;
+use crate::utils::format_set;
+
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{prelude::*, BufReader};
+
 use yosys_netlist_json as yosys;
+
 #[macro_use]
 extern crate log;
-#[cfg(feature = "flame_it")]
 #[macro_use]
-extern crate flamer;
+extern crate derivative;
 
 mod clk_vcd;
 mod comp_prop;
@@ -23,23 +25,8 @@ mod netlist;
 mod tg_graph;
 mod utils;
 
-use crate::error::CResult;
-use crate::gadgets::Latency;
-use crate::utils::format_set;
-
-#[cfg(feature = "flame_it")]
-mod cflame {
-    pub use flame::{end, start};
-}
-#[cfg(not(feature = "flame_it"))]
-mod cflame {
-    #![allow(dead_code)]
-    pub fn start(_x: &str) {}
-    pub fn end(_x: &str) {}
-}
-
 // rnd_timings to map: port -> offsets for each cycle
-pub fn abstract_rnd_timings<'a>(
+fn abstract_rnd_timings<'a>(
     rnd_timings: impl Iterator<Item = &'a (gadgets::Random<'a>, Latency)>,
 ) -> Vec<HashMap<&'a str, Vec<usize>>> {
     let mut res = Vec::new();
@@ -55,7 +42,8 @@ pub fn abstract_rnd_timings<'a>(
     res
 }
 
-pub fn rnd_timing_disp<'a>(
+/// Map the rnd_timings information to user-readable form.
+fn rnd_timing_disp<'a>(
     rnd_timings: impl Iterator<Item = &'a (gadgets::Random<'a>, Latency)>,
 ) -> Vec<Vec<(&'a str, String)>> {
     abstract_rnd_timings(rnd_timings)
@@ -71,14 +59,14 @@ pub fn rnd_timing_disp<'a>(
         .collect()
 }
 
-#[cfg_attr(feature = "flame_it", flame)]
+/// Verify that a gadgets satisfies all the rules
 fn check_gadget<'a, 'b>(
     gadgets: &'b gadgets::Gadgets<'a>,
     gadget_name: gadgets::GKind<'a>,
     check_state_cleared: bool,
     controls: &mut clk_vcd::ModuleControls,
 ) -> CResult<'a, Option<tg_graph::AUGIGraph<'a, 'b>>> {
-    let gadget = &gadgets[gadget_name];
+    let gadget = &gadgets[&gadget_name];
     match gadget.strat {
         netlist::GadgetStrat::Assumed => Ok(None),
         netlist::GadgetStrat::Isolate => {
@@ -98,9 +86,9 @@ fn check_gadget<'a, 'b>(
             println!("Checking gadget {}...", gadget_name);
             assert_eq!(gadget.strat, netlist::GadgetStrat::CompositeProp);
             println!("computing internals...");
-            let gadget_internals = gadget_internals::module2internals(gadget, &gadgets)?;
+            let gadget_internals = GadgetInternals::from_module(gadget, &gadgets)?;
             println!("internals computed");
-            gadget_internals::check_gadget_preserves_sharings(&gadgets, &gadget_internals)?;
+            gadget_internals.check_sharings()?;
             println!("Sharings preserved: ok.");
 
             let n_cycles = controls.len() as gadgets::Latency;
@@ -151,15 +139,15 @@ fn check_gadget<'a, 'b>(
             if check_state_cleared {
                 _a_graph.check_state_cleared()?;
             }
-            comp_prop::check_sec_prop2(&_a_graph)?;
+            comp_prop::check_sec_prop(&_a_graph)?;
             println!("check successful for gadget {}", gadget_name);
             Ok(Some(_a_graph))
         }
     }
 }
 
-#[cfg_attr(feature = "flame_it", flame)]
-fn check_gadget2<'a>(
+/// Verify that the top-level gadets (and all sub-gadgets) satisfy the rules.
+fn check_gadget_top<'a>(
     netlist: &'a yosys::Netlist,
     simu: &mut impl Read,
     root_simu_mod: Vec<String>,
@@ -169,6 +157,7 @@ fn check_gadget2<'a>(
     input_valid_signal: String,
     check_state_cleared: bool,
 ) -> Result<(), CompErrors<'a>> {
+    let gadget_name = gadget_name.into();
     let gadgets = gadgets::netlist2gadgets(netlist)?;
     println!("checking gadget {:?}", gadget_name);
 
@@ -192,12 +181,12 @@ fn check_gadget2<'a>(
     let mut controls = clk_vcd::ModuleControls::from_enable(&vcd_states, dut_path, &in_valid_path)?;
 
     let n_cycles = controls.len() as gadgets::Latency;
-    let max_delay_output = gadgets[gadget_name].max_output_lat();
+    let max_delay_output = gadgets[&gadget_name].max_output_lat();
     if (max_delay_output + 1 > n_cycles)
         || (max_delay_output + 1 >= n_cycles && check_state_cleared)
     {
         return Err(CompError {
-            module: Some(netlist.modules[gadget_name].clone()),
+            module: Some(netlist.modules[*gadget_name.get()].clone()),
             net: None,
             kind: CompErrorKind::Other(format!(
                 "Not enough simulated cycles to check the top-level gadget.\n\
@@ -223,17 +212,17 @@ fn check_gadget2<'a>(
         return Ok(());
     };
 
-    let mut gadgets_to_check: Vec<(&str, _)> = Vec::new();
+    let mut gadgets_to_check: Vec<(gadgets::GKind, _)> = Vec::new();
     // FIXME Should also check "only glitch" gadgets
     for ((name, cycle), base) in g_graph.sensitive_gadgets() {
         let gadget_name = base.kind.name;
-        let controls = controls.submodule((*name).to_owned(), cycle as usize);
+        let controls = controls.submodule((*name.get()).to_owned(), cycle as usize);
         gadgets_to_check.push((gadget_name, controls));
     }
-    let mut gadgets_checked: HashMap<String, Vec<clk_vcd::StateLookups>> = HashMap::new();
+    let mut gadgets_checked: HashMap<gadgets::GKind, Vec<clk_vcd::StateLookups>> = HashMap::new();
     while let Some((sg_name, mut sg_controls)) = gadgets_to_check.pop() {
         let mut gadget_ok = false;
-        for state_lookups in gadgets_checked.get(sg_name).unwrap_or(&Vec::new()) {
+        for state_lookups in gadgets_checked.get(&sg_name).unwrap_or(&Vec::new()) {
             if state_lookups.iter().all(|((path, cycle, idx), state)| {
                 sg_controls.lookup(path.clone(), *cycle, *idx).unwrap() == state.as_ref()
             }) {
@@ -252,7 +241,7 @@ fn check_gadget2<'a>(
             for ((name, cycle), base) in ur_sg.sensitive_gadgets() {
                 gadgets_to_check.push((
                     base.kind.name,
-                    sg_controls.submodule((*name).to_owned(), cycle as usize),
+                    sg_controls.submodule((*name.get()).to_owned(), cycle as usize),
                 ));
             }
         }
@@ -263,7 +252,8 @@ fn check_gadget2<'a>(
     }
     Ok(())
 }
-pub fn main_wrap2() -> Result<(), Box<dyn std::error::Error>> {
+
+pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = config::parse_cmd_line();
     let file_synth = File::open(&config.json)
         .map_err(|_| format!("Did not find the result of synthesis '{}'.", &config.json))?;
@@ -277,7 +267,7 @@ pub fn main_wrap2() -> Result<(), Box<dyn std::error::Error>> {
     let mut file_simu = BufReader::new(file_simu);
     let netlist = yosys::Netlist::from_reader(file_synth)?;
     let root_simu_mod = vec![config.tb.clone()];
-    match check_gadget2(
+    match check_gadget_top(
         &netlist,
         &mut file_simu,
         root_simu_mod,

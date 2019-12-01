@@ -2,8 +2,10 @@ use crate::error::{CompError, CompErrorKind};
 use std::borrow::Borrow;
 use std::collections::HashMap;
 
+/// State of a circuit at one clock cycle.
 pub type State = HashMap<vcd::IdCode, VarState>;
 
+/// State of a variable at one clock cycle.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum VarState {
     Scalar(vcd::Value),
@@ -11,9 +13,11 @@ pub enum VarState {
     Uninit,
 }
 
+/// Id of a variable (for lookup into State)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct VarId(vcd::IdCode);
 
+/// States of a circuit over time.
 #[derive(Debug)]
 pub struct VcdStates {
     header: vcd::Header,
@@ -21,7 +25,7 @@ pub struct VcdStates {
 }
 
 impl VcdStates {
-    #[cfg_attr(feature = "flame_it", flame)]
+    /// Create VcdStates from a reader of a vcd file and the path of the clock signal.
     pub fn new<'a>(
         r: &mut impl std::io::Read,
         clock: &[impl Borrow<str>],
@@ -46,6 +50,8 @@ impl VcdStates {
         )?;
         Ok(Self { header, states })
     }
+
+    /// VarId from the path (list of strings) of a variable
     pub fn get_var_id<'a>(&self, path: &[impl Borrow<str>]) -> Result<VarId, CompError<'a>> {
         Ok(VarId(
             self.header
@@ -61,10 +67,15 @@ impl VcdStates {
                 .code,
         ))
     }
+
+    /// State of a variable. Returns None if the cycle is too large compared to what was in the vcd.
     pub fn get_var(&self, var: VarId, cycle: usize) -> Option<&VarState> {
         trace!("cycle: {}, n_cycles: {}", cycle, self.states.len());
         self.states.get(cycle).map(|state| &state[&var.0])
     }
+
+    /// State of a wire in a vector variable. Returns None if the cycle is too large compared to
+    /// what was in the vcd.
     pub fn get_var_idx(&self, var: VarId, cycle: usize, offset: usize) -> Option<VarState> {
         self.get_var(var, cycle).map(|state| match state {
             res @ VarState::Scalar(_) => {
@@ -75,13 +86,22 @@ impl VcdStates {
             VarState::Vector(values) => VarState::Scalar(values[offset]),
         })
     }
+
+    /// Number of clock cycles in the vcd file.
     pub fn len(&self) -> usize {
         self.states.len()
     }
 }
 
+// FIXME: could we replace the Vec<String> with a VarId for better efficiency ?
+/// Records the path and the results of all the queries.
 pub type StateLookups = HashMap<(Vec<String>, usize, usize), Option<VarState>>;
 
+/// Query the control signals in a module.
+/// Adds the following features on top of VcdStates:
+/// * working in a submodule (i.e. prepends a prefix to all path queries)
+/// * working from a cycle offset.
+/// * recording all the queries (and their results)
 #[derive(Debug)]
 pub struct ModuleControls<'a> {
     vcd_states: &'a VcdStates,
@@ -99,6 +119,10 @@ impl<'a> ModuleControls<'a> {
             accessed: HashMap::new(),
         }
     }
+
+    /// Create a ModulesControls for the given root_module, with cycle 0 set to the first cycle
+    /// where tne enable signal is asserted.
+    /// The enable signal and root_module paths start at the vcd root.
     pub fn from_enable<'b>(
         vcd_states: &'a VcdStates,
         root_module: Vec<String>,
@@ -120,6 +144,10 @@ impl<'a> ModuleControls<'a> {
         debug!("ModuleControls offset: {}", offset);
         Ok(Self::new(vcd_states, root_module, offset))
     }
+
+    /// Create a fresh ModuleControls, incrementing the cycle offset by time_offset from the
+    /// current offset and selecting a sub-module path from the current one.
+    /// The StateLookups state of the new ModuleControls is empty.
     pub fn submodule(&self, module: String, time_offset: usize) -> Self {
         let mut path = self.root_module.clone();
         path.push(module);
@@ -130,6 +158,9 @@ impl<'a> ModuleControls<'a> {
             accessed: StateLookups::new(),
         }
     }
+
+    /// Lookup the value of the wire path[idx] at the given cycle.
+    /// Returns None when the cycle to be looked up is after the end of the vcd file.
     pub fn lookup<'b>(
         &mut self,
         path: Vec<String>,
@@ -147,14 +178,20 @@ impl<'a> ModuleControls<'a> {
             .or_insert_with(|| vcd_states.get_var_idx(var_id, offset + cycle, idx))
             .as_ref())
     }
+
+    /// Returns the list of the lookups.
     pub fn lookups(self) -> StateLookups {
         self.accessed
     }
+
+    /// Number of cycles from the start of the module to the end of the vcd.
     pub fn len(&self) -> usize {
         self.vcd_states.len() - self.offset
     }
 }
 
+/// Maps the state of a vector signal from the vcd (truncated, BE) to the representation used in
+/// the states (not trucated, LE).
 fn pad_vec_and_reverse(mut vec: Vec<vcd::Value>, size: u32) -> Vec<vcd::Value> {
     // We need to reverse order of bits since last one in binary writing is at offset 0.
     // Then we pad since leading '0', 'x' or 'z' are not always written.
@@ -168,7 +205,7 @@ fn pad_vec_and_reverse(mut vec: Vec<vcd::Value>, size: u32) -> Vec<vcd::Value> {
     vec
 }
 
-#[cfg_attr(feature = "flame_it", flame)]
+/// Computes the state from the vcd reader, the clock and the list of variables.
 fn clocked_states<'a>(
     vars: &HashMap<vcd::IdCode, vcd::Var>,
     clock: vcd::IdCode,
@@ -225,6 +262,7 @@ fn clocked_states<'a>(
     Ok(states)
 }
 
+/// List the variables in the vcd.
 fn list_vars(header: &vcd::Header) -> HashMap<vcd::IdCode, vcd::Var> {
     let mut res = HashMap::new();
     let mut remaining_items = header.items.iter().collect::<Vec<_>>();

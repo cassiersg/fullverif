@@ -1,11 +1,11 @@
 use itertools::Itertools;
 
+/// For generic functions over various int types.
 pub trait Int:
     std::fmt::Display + std::cmp::Ord + Copy + std::cmp::Eq + std::ops::Add<Output = Self>
 {
     fn one() -> Self;
 }
-
 impl Int for usize {
     fn one() -> Self {
         1
@@ -17,6 +17,7 @@ impl Int for u32 {
     }
 }
 
+/// Represents the input set of integers as a series of closed intervals.
 fn abstract_set<T: Int>(it: impl Iterator<Item = T>) -> impl Iterator<Item = (T, T)> {
     let mut vals = it.collect::<Vec<_>>();
     vals.sort_unstable();
@@ -32,6 +33,7 @@ fn abstract_set<T: Int>(it: impl Iterator<Item = T>) -> impl Iterator<Item = (T,
         })
 }
 
+/// Represents the input set of integers as a human-readable short string.
 pub fn format_set<T: Int>(it: impl Iterator<Item = T>) -> String {
     let mut res = String::new();
     for (start, end) in abstract_set(it) {
