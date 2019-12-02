@@ -110,11 +110,11 @@ inputs of sub-gadgets, deducing which ones are needed.
 We use verilog annotations to convey informations about the masking scheme to
 fullVerif.
 For each gadget, the following annotation are required on the module itself:
-+ `psim_order` (*int*): specifies the number of shares of the masking.
-+ `psim_prop` (*string*): gives the security property satisfied by this module. The
++ `fv_order` (*int*): specifies the number of shares of the masking.
++ `fv_prop` (*string*): gives the security property satisfied by this module. The
   following properties are understood: `PINI`, `NI`, `SNI`, `affine` (for
   gadget which preserve strict isolation of shares).
-+ `psim_strat` (*string*): strategy for proving this module.
++ `fv_strat` (*string*): strategy for proving this module.
     * `"assumed"`: the tool will perform no check on the gadget (typically used
       for gadgets whose implementation has been checked either manually or
       using another tool),
@@ -130,13 +130,13 @@ For each gadget, the following annotation are required on the module itself:
       implementation": any output share of the gadget must only be wired to the
       corresponding input shares.
 
-All the ports of the module also have to be annotated using the `psim_type`
+All the ports of the module also have to be annotated using the `fv_type`
 attribute, which may have any of the four following values:
 + `"sharing"`: denotes an input or output sharing (depending on the direction of
-        the port). The `psim_latency` attribute is required (see below).
-The optional `psim_count` attribute denotes the number of sharings
+        the port). The `fv_latency` attribute is required (see below).
+The optional `fv_count` attribute denotes the number of sharings
 contained into the sharing (defaults to 1).
-The width of the port must be `psim_count*psim_order`, and the share of one
+The width of the port must be `fv_count*fv_order`, and the share of one
 sharing must be packed together (i.e., the first sharing is `port[0 +: d]`, the
 second is `port[d +: d]`... where `d` is the number of shares).
 + `"clock"`: The must be at most one input clock signal (whose width must be 1).
@@ -144,23 +144,23 @@ second is `port[d +: d]`... where `d` is the number of shares).
 + `"random"`: Randomness input used for masked gadgets.
 Each randomness port must specify its latency, this is done by first splitting
 the input into contiguous chunks of bits (starting at bit 0), where the size of
-chunk `i` is `psim_rnd_count_{i}`.
-The number of chunks must be given in the `psim_count` attribute.
-The latency for chunk `i` is given in attribute `psim_rnd_lat_{i}`.
+chunk `i` is `fv_rnd_count_{i}`.
+The number of chunks must be given in the `fv_count` attribute.
+The latency for chunk `i` is given in attribute `fv_rnd_lat_{i}`.
 Chunks may be valid at more than one clock cycle. This is specified by
-using the `psim_rnd_lats_{i}` attribute in place of the `psim_rnd_lat_{i}` attribute;
-the semantic of its value is identical to the that of the `psim_latencies`
+using the `fv_rnd_lats_{i}` attribute in place of the `fv_rnd_lat_{i}` attribute;
+the semantic of its value is identical to the that of the `fv_latencies`
 attribute of input sharings (see below).
 For the top-level module, all chunks and latency information may not be
-provided by setting `psim_count=0`, in which case random latencies are
+provided by setting `fv_count=0`, in which case random latencies are
 inferred.
 
 *Latency specification.* The latency is given for input and output sharings and
 randomness in number of clock cycles.
 For each module, all latencies must be postitive integers.
 Input sharings may be valid at more than one clock cycle. This is specified by
-using the `psim_latencies` attribute in place of the `psim_latency` attribute.
-The value of the `psim_latencies` attribute must be a positive integer.
+using the `fv_latencies` attribute in place of the `fv_latency` attribute.
+The value of the `fv_latencies` attribute must be a positive integer.
 Let `bi` be the `i`-th bit of the binary decomposition of that value, with `b0`
 the LSB. The input is valid at cycle `i` iff `bi` is 1.
 
@@ -191,7 +191,8 @@ into account.
 From there on, the sub-gadget graph corresponds more to a computation graph
 than to a physical netlist.
 On this graph, we can then use control signal values obtained from the
-simulation to replace each mux gadget with the corresponding wiring, then
+simulation to replace each mux (whose signal is not a sensitive value) gadget
+with the corresponding wiring, then
 analyze which gadget actually compute on valid values (that is, sharings that
 depend on the inputs, and not on the initial state of the circuit, which is
 considered to be invalid).
@@ -261,7 +262,7 @@ See [LICENSE-GPL3](LICENSE-GPL3), [LICENSE-APACHE](LICENSE-APACHE),
 - `gadgets.rs`: Interface of a gadget from the module ports and verilog annotations.
 - `gadget_internals.rs`: Representation of a composite gadget as a graph of
   sub-gadgets and randomness distribution circuit.
-- `timed_gadgets.rs`: "Unrolling" of a gadget over time, resulting in a
+- `tg_graph.rs`: "Unrolling" of a gadget over time, resulting in a
   computation graph. Analysis of control signals and simplification.
 - `comp_prop.rs`: checking of the compositional strategy based on the
   computation graph.

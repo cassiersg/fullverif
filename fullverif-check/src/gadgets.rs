@@ -1,3 +1,5 @@
+//! Interface of a gadget: its security properties, its input and output signals.
+
 use crate::error::{CompError, CompErrorKind};
 use crate::netlist::{self, GadgetProp, GadgetStrat, WireAttrs};
 use std::collections::HashMap;

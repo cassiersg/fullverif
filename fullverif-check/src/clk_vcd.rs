@@ -1,3 +1,5 @@
+//! Analysis of vcd files as a series of state, for each clock cycle.
+
 use crate::error::{CompError, CompErrorKind};
 use std::borrow::Borrow;
 use std::collections::HashMap;

@@ -1,3 +1,6 @@
+//! Internals of a composite gadgets: sub-gadgets, their connections, inputs and outputs
+//! connections, connections to the randomness.
+
 use crate::error::{CResult, CompError, CompErrorKind, CompErrors, DBitVal};
 use crate::gadgets::{Gadget, Gadgets, Random, Sharing};
 use std::collections::{hash_map, HashMap};
