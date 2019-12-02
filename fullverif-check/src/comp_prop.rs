@@ -3,7 +3,7 @@ use crate::netlist;
 
 /// Verifies that the gadget dataflow satisfies its claimed property.
 pub fn check_sec_prop<'a, 'b>(
-    gadget: &crate::tg_graph::AUGIGraph<'a, 'b>,
+    gadget: &crate::tg_graph::AGadgetFlow<'a, 'b>,
 ) -> Result<(), CompError<'a>> {
     match gadget.internals.gadget.prop {
         netlist::GadgetProp::Affine => {

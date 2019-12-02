@@ -26,7 +26,7 @@ type RndTrace<'a> = Vec<(RndConnection<'a>, gadgets::Latency)>;
 
 /// A gadget in the GadgetFlow
 #[derive(Debug, Clone)]
-struct TGadget<'a, 'b> {
+struct GadgetNode<'a, 'b> {
     base: gadget_internals::GadgetInstance<'a, 'b>,
     name: (GName<'a>, Latency),
     random_connections: HashMap<TRandom<'a>, TRndConnection<'a>>,
@@ -34,47 +34,21 @@ struct TGadget<'a, 'b> {
 
 /// A node in the GadgetFlow: gadget, input, output or invalid
 #[derive(Debug, Clone)]
-enum TGInst<'a, 'b> {
-    Gadget(TGadget<'a, 'b>),
+enum GFNode<'a, 'b> {
+    Gadget(GadgetNode<'a, 'b>),
     Input(Latency),
     Output,
     Invalid,
 }
 
-impl<'a, 'b> TGInst<'a, 'b> {
+impl<'a, 'b> GFNode<'a, 'b> {
     fn is_gadget(&self) -> bool {
-        if let TGInst::Gadget(_) = self {
+        if let GFNode::Gadget(_) = self {
             true
         } else {
             false
         }
     }
-}
-
-/// An edge in the basic FlowGraph
-pub type Edge<'a> = (Sharing<'a>, Input<'a>);
-
-/// An edge in the annotated FlowGraph
-pub struct AEdge<'a> {
-    edge: Edge<'a>,
-    valid: bool,
-    sensitive: Sensitive,
-}
-
-/// Annotated FlowGraph: validity and sensitivity information is included in each edge.
-pub type AUGIGraph<'a, 'b> = UGIGraph<'a, 'b, AEdge<'a>>;
-
-/// Data flow graph for gadget.
-/// Built by repeating the GadgetInternals in the time dimension,
-/// and connecting gadgets according to latency annotations.
-pub struct UGIGraph<'a, 'b, E = Edge<'a>> {
-    pub internals: gadget_internals::GadgetInternals<'a, 'b>,
-    gadgets: Graph<TGInst<'a, 'b>, E>,
-    n_cycles: Latency,
-    o_node: petgraph::graph::NodeIndex,
-    #[allow(dead_code)]
-    inv_node: petgraph::graph::NodeIndex,
-    i_nodes: Vec<petgraph::graph::NodeIndex>,
 }
 
 /// Dependency of the content of a wire on the secrets.
@@ -88,74 +62,45 @@ pub enum Sensitive {
     Yes,
 }
 
+/// An edge in the basic FlowGraph
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Edge<'a> {
+    output: Sharing<'a>,
+    input: Input<'a>,
+}
+
+/// An edge in the annotated FlowGraph
+pub struct AEdge<'a> {
+    edge: Edge<'a>,
+    valid: bool,
+    sensitive: Sensitive,
+}
+
+/// Data flow graph for gadget.
+/// Built by repeating the GadgetInternals in the time dimension,
+/// and connecting gadgets according to latency annotations.
+pub struct GadgetFlow<'a, 'b, E> {
+    pub internals: gadget_internals::GadgetInternals<'a, 'b>,
+    gadgets: Graph<GFNode<'a, 'b>, E>,
+    n_cycles: Latency,
+    o_node: petgraph::graph::NodeIndex,
+    #[allow(dead_code)]
+    inv_node: petgraph::graph::NodeIndex,
+    i_nodes: Vec<petgraph::graph::NodeIndex>,
+}
+
+/// Non-annocated GadgetFlow.
+pub type BGadgetFlow<'a, 'b> = GadgetFlow<'a, 'b, Edge<'a>>;
+
+/// Annotated GadgetFlow: validity and sensitivity information is included in each edge.
+pub type AGadgetFlow<'a, 'b> = GadgetFlow<'a, 'b, AEdge<'a>>;
+
 const EMPTY_SHARING: Sharing = Sharing {
     port_name: "",
     pos: 0,
 };
 
-/// Build a map random input -> timed random connections for a gadget.
-fn random_connections<'a, 'b>(
-    sgi: &gadget_internals::GadgetInstance<'a, 'b>,
-    cycle: u32,
-) -> CResult<'a, HashMap<TRandom<'a>, TRndConnection<'a>>> {
-    let mut res = HashMap::new();
-    for (r_name, random_lats) in sgi.kind.randoms.iter() {
-        match random_lats {
-            Some(random_lats) => {
-                for lat in random_lats.iter() {
-                    res.insert(
-                        (*r_name, *lat),
-                        (sgi.random_connections[r_name], lat + cycle),
-                    );
-                }
-            }
-            None => {
-                Err(CompError::ref_sn(
-                    sgi.kind.module,
-                    &r_name.port_name,
-                    CompErrorKind::MissingAnnotation("psim_lat".to_owned()),
-                ))?;
-            }
-        }
-    }
-    Ok(res)
-}
-
-/// Find the source GadgetFlow node for a Connection at the given cycle.
-fn time_connection<'a, 'b>(
-    conn: &gadget_internals::Connection<'a>,
-    internals: &gadget_internals::GadgetInternals<'a, 'b>,
-    src_latency: Latency,
-    cycle: Latency,
-    n_cycles: Latency,
-    i_nodes: &Vec<NodeIndex>,
-    g_nodes: &HashMap<Name<'a>, NodeIndex>,
-    inv_node: NodeIndex,
-) -> (NodeIndex, Sharing<'a>) {
-    match conn {
-        Connection::GadgetOutput {
-            gadget_name,
-            output,
-        } => {
-            let output_latency = internals.subgadgets[gadget_name].kind.outputs[output];
-            if let Some(ref_cycle) = (cycle + src_latency)
-                .checked_sub(output_latency)
-                .filter(|ref_cycle| *ref_cycle < n_cycles)
-            {
-                return (g_nodes[&(*gadget_name, ref_cycle)], *output);
-            }
-        }
-        Connection::Input(input) => {
-            let in_lat = src_latency + cycle;
-            if internals.gadget.inputs[input].contains(&in_lat) {
-                return (i_nodes[in_lat as usize], *input);
-            }
-        }
-    }
-    (inv_node, EMPTY_SHARING)
-}
-
-impl<'a, 'b, E> UGIGraph<'a, 'b, E> {
+impl<'a, 'b, E> GadgetFlow<'a, 'b, E> {
     /// Returns the value of the control signal of each mux gadget in the graph.
     /// Returns None when the signal is invalid (either x or y).
     fn muxes_controls(
@@ -164,7 +109,7 @@ impl<'a, 'b, E> UGIGraph<'a, 'b, E> {
     ) -> CResult<'a, HashMap<NodeIndex, Option<bool>>> {
         let mut muxes_ctrls = HashMap::<NodeIndex, Option<bool>>::new();
         for (idx, tginst) in self.gadgets.node_references() {
-            if let TGInst::Gadget(gadget) = tginst {
+            if let GFNode::Gadget(gadget) = tginst {
                 if gadget.base.kind.prop == netlist::GadgetProp::Mux {
                     let sel_name = "sel".to_owned();
                     let path: Vec<String> =
@@ -203,9 +148,9 @@ impl<'a, 'b, E> UGIGraph<'a, 'b, E> {
     }
 
     /// Iterator of all the gadgets in the graph.
-    fn gadgets<'s>(&'s self) -> impl Iterator<Item = (NodeIndex, &'s TGadget<'a, 'b>)> + 's {
+    fn gadgets<'s>(&'s self) -> impl Iterator<Item = (NodeIndex, &'s GadgetNode<'a, 'b>)> + 's {
         self.gadgets.node_identifiers().filter_map(move |idx| {
-            if let &TGInst::Gadget(ref gadget) = &self.gadgets[idx] {
+            if let &GFNode::Gadget(ref gadget) = &self.gadgets[idx] {
                 Some((idx, gadget))
             } else {
                 None
@@ -219,8 +164,8 @@ impl<'a, 'b, E> UGIGraph<'a, 'b, E> {
     }
 
     /// Get the gadget with the given node index. (Panics on error.)
-    fn gadget(&self, idx: NodeIndex) -> &TGadget<'a, 'b> {
-        if let TGInst::Gadget(ref gadget) = &self.gadgets[idx] {
+    fn gadget(&self, idx: NodeIndex) -> &GadgetNode<'a, 'b> {
+        if let GFNode::Gadget(ref gadget) = &self.gadgets[idx] {
             gadget
         } else {
             panic!("Gadget at index {:?} is not a gadget.", idx)
@@ -228,7 +173,7 @@ impl<'a, 'b, E> UGIGraph<'a, 'b, E> {
     }
 }
 
-impl<'a, 'b> UGIGraph<'a, 'b> {
+impl<'a, 'b> BGadgetFlow<'a, 'b> {
     /// Build (non-annotated) a GadgetFlow graph from the GadgetInternals, for n_cycles execution
     /// cycles.
     pub fn unroll(
@@ -236,15 +181,15 @@ impl<'a, 'b> UGIGraph<'a, 'b> {
         n_cycles: Latency,
     ) -> CResult<'a, Self> {
         let mut gadgets = Graph::new();
-        let o_node = gadgets.add_node(TGInst::Output);
-        let inv_node = gadgets.add_node(TGInst::Invalid);
+        let o_node = gadgets.add_node(GFNode::Output);
+        let inv_node = gadgets.add_node(GFNode::Invalid);
         let i_nodes = (0..n_cycles)
-            .map(|lat| gadgets.add_node(TGInst::Input(lat)))
+            .map(|lat| gadgets.add_node(GFNode::Input(lat)))
             .collect::<Vec<_>>();
         let mut g_nodes = HashMap::new();
         for (name, sgi) in internals.subgadgets.iter() {
             for lat in 0..n_cycles {
-                let g = gadgets.add_node(TGInst::Gadget(TGadget {
+                let g = gadgets.add_node(GFNode::Gadget(GadgetNode {
                     base: sgi.clone(),
                     name: (*name, lat),
                     random_connections: random_connections(sgi, lat)?,
@@ -265,7 +210,14 @@ impl<'a, 'b> UGIGraph<'a, 'b> {
                         &g_nodes,
                         inv_node,
                     );
-                    gadgets.add_edge(src_g, g_nodes[&(*name, cycle)], (src_o, input));
+                    gadgets.add_edge(
+                        src_g,
+                        g_nodes[&(*name, cycle)],
+                        Edge {
+                            output: src_o,
+                            input,
+                        },
+                    );
                 }
             }
         }
@@ -274,7 +226,14 @@ impl<'a, 'b> UGIGraph<'a, 'b> {
                 let (src_g, src_o) = time_connection(
                     conn, &internals, 0, cycle, n_cycles, &i_nodes, &g_nodes, inv_node,
                 );
-                gadgets.add_edge(src_g, o_node, (src_o, (*output, cycle)));
+                gadgets.add_edge(
+                    src_g,
+                    o_node,
+                    Edge {
+                        output: src_o,
+                        input: (*output, cycle),
+                    },
+                );
             }
         }
         Ok(Self {
@@ -300,7 +259,7 @@ impl<'a, 'b> UGIGraph<'a, 'b> {
                 // invert because we remove the input
                 let input = if !*ctrl { "in_true" } else { "in_false" };
                 for e in self.g_inputs(*idx) {
-                    if (e.weight().1).0.port_name == input {
+                    if (e.weight().input).0.port_name == input {
                         edges_kept[e.id().index()] = false;
                     }
                 }
@@ -335,18 +294,18 @@ impl<'a, 'b> UGIGraph<'a, 'b> {
         let mut edges_sensitive: Vec<Option<Sensitive>> = vec![None; self.gadgets.edge_count()];
         for idx in sorted_nodes.into_iter() {
             match &self.gadgets[*idx] {
-                TGInst::Gadget(_) => {
+                GFNode::Gadget(_) => {
                     if let Some(ctrl) = muxes_ctrls.get(idx) {
                         let mut outputs: Vec<Option<usize>> =
                             vec![None; self.g_outputs(*idx).count()];
                         for o_e in self.g_outputs(*idx) {
-                            let pos = o_e.weight().0.pos as usize;
+                            let pos = o_e.weight().output.pos as usize;
                             outputs[pos] = Some(o_e.id().index());
                         }
                         if let Some(ctrl) = ctrl {
                             let input = if *ctrl { "in_true" } else { "in_false" };
                             for e_i in self.g_inputs(*idx) {
-                                let Sharing { port_name, pos } = &(e_i.weight().1).0;
+                                let Sharing { port_name, pos } = &e_i.weight().input.0;
                                 if port_name == &input {
                                     edges_valid[outputs[*pos as usize].unwrap()] =
                                         edges_valid[e_i.id().index()];
@@ -357,7 +316,7 @@ impl<'a, 'b> UGIGraph<'a, 'b> {
                             }
                         } else {
                             for e_i in self.g_inputs(*idx) {
-                                let Sharing { pos, .. } = &(e_i.weight().1).0;
+                                let Sharing { pos, .. } = &e_i.weight().input.0;
                                 let output = outputs[*pos as usize].unwrap();
                                 let sens_new = edges_sensitive[e_i.id().index()].unwrap();
                                 let sens = edges_sensitive[output].get_or_insert(Sensitive::No);
@@ -382,10 +341,10 @@ impl<'a, 'b> UGIGraph<'a, 'b> {
                         }
                     }
                 }
-                TGInst::Input(lat) => {
+                GFNode::Input(lat) => {
                     for e in self.g_outputs(*idx) {
-                        let (src_sharing, _) = e.weight();
-                        let valid = self.internals.gadget.inputs[src_sharing].contains(&lat);
+                        let Edge { output, .. } = e.weight();
+                        let valid = self.internals.gadget.inputs[output].contains(&lat);
                         edges_valid[e.id().index()] = Some(valid);
                         // Worst-case analysis: we assume there may be glitches on the inputs.
                         edges_sensitive[e.id().index()] = if valid {
@@ -395,10 +354,10 @@ impl<'a, 'b> UGIGraph<'a, 'b> {
                         };
                     }
                 }
-                TGInst::Output => {
+                GFNode::Output => {
                     assert!(self.g_outputs(*idx).next().is_none());
                 }
-                TGInst::Invalid => {
+                GFNode::Invalid => {
                     // Connections from non-existing gadgets or out of range inputs.
                     // Assume that they are non-sensitive (might want to assume glitch ?)
                     for e in self.g_outputs(*idx) {
@@ -419,10 +378,10 @@ impl<'a, 'b> UGIGraph<'a, 'b> {
         while let Some(idx) = gl_to_analyze.pop() {
             let noglitch_cycle = compute_sensitivity(
                 self.g_inputs(idx)
-                    .map(|e| (edges_sensitive[e.id().index()], e.weight().1)),
+                    .map(|e| (edges_sensitive[e.id().index()], e.weight().input)),
             );
             for e in self.g_outputs(idx) {
-                let output_lat = self.gadget(idx).base.kind.outputs[&e.weight().0];
+                let output_lat = self.gadget(idx).base.kind.outputs[&e.weight().output];
                 if edges_sensitive[e.id().index()] == Sensitive::No && output_lat < noglitch_cycle {
                     edges_sensitive[e.id().index()] = Sensitive::Glitch;
                     if self.gadgets[e.target()].is_gadget() {
@@ -441,7 +400,7 @@ impl<'a, 'b> UGIGraph<'a, 'b> {
     pub fn annotate(
         &self,
         controls: &mut clk_vcd::ModuleControls,
-    ) -> CResult<'a, AUGIGraph<'a, 'b>> {
+    ) -> CResult<'a, AGadgetFlow<'a, 'b>> {
         let muxes_ctrls = self.muxes_controls(controls)?;
         let sorted_nodes = self.toposort(&muxes_ctrls)?;
         let (validities, sensitivities) = self.annotate_inner(&muxes_ctrls, &sorted_nodes)?;
@@ -468,7 +427,7 @@ impl<'a, 'b> UGIGraph<'a, 'b> {
                     .index()
             );
         }
-        Ok(UGIGraph::<AEdge> {
+        Ok(AGadgetFlow {
             internals: self.internals.clone(),
             gadgets: new_gadgets,
             n_cycles: self.n_cycles,
@@ -479,7 +438,7 @@ impl<'a, 'b> UGIGraph<'a, 'b> {
     }
 }
 
-impl<'a, 'b> UGIGraph<'a, 'b, AEdge<'a>> {
+impl<'a, 'b> GadgetFlow<'a, 'b, AEdge<'a>> {
     /// Is the gadget n valid, that is, are all the inputs of node n valid ?
     fn gadget_valid(&self, n: NodeIndex) -> bool {
         self.g_inputs(n).all(|e| e.weight().valid)
@@ -545,24 +504,24 @@ impl<'a, 'b> UGIGraph<'a, 'b, AEdge<'a>> {
             println!("Inputs:");
             for e in self.g_inputs(id) {
                 let AEdge {
-                    edge: (_, (sharing, lat)),
+                    edge: Edge { input, .. },
                     valid,
                     sensitive,
                 } = e.weight();
                 println!(
                     "\tinput ({}[{}], {}): Valid: {:?}, Sensitive: {:?}",
-                    sharing.port_name, sharing.pos, lat, valid, sensitive
+                    input.0.port_name, input.0.pos, input.1, valid, sensitive
                 );
             }
             for e in self.g_outputs(id) {
                 let AEdge {
-                    edge: (sharing, _),
+                    edge: Edge { output, .. },
                     valid,
                     sensitive,
                 } = e.weight();
                 println!(
                     "\toutput {}[{}]: Valid: {:?}, Sensitive: {:?}",
-                    sharing.port_name, sharing.pos, valid, sensitive
+                    output.port_name, output.pos, valid, sensitive
                 );
             }
         }
@@ -574,7 +533,7 @@ impl<'a, 'b> UGIGraph<'a, 'b, AEdge<'a>> {
             .g_inputs(self.o_node)
             .filter_map(|e| {
                 if e.weight().valid {
-                    Some(e.weight().edge.1)
+                    Some(e.weight().edge.input)
                 } else {
                     None
                 }
@@ -600,7 +559,7 @@ impl<'a, 'b> UGIGraph<'a, 'b, AEdge<'a>> {
                 // We don't care about glitches, those are inferred and always assumed by the
                 // outside world.
                 if e.weight().sensitive == Sensitive::Yes {
-                    let (sh, lat) = e.weight().edge.1;
+                    let (sh, lat) = e.weight().edge.input;
                     if self.internals.gadget.outputs.get(&sh).map(|l| *l == lat) != Some(true) {
                         return Some((sh, lat));
                     }
@@ -664,7 +623,7 @@ impl<'a, 'b> UGIGraph<'a, 'b, AEdge<'a>> {
                     let random_uses = uses
                         .iter()
                         .map(|(idx, rnd)| {
-                            let TGadget { name, .. } = self.gadget(*idx);
+                            let GadgetNode { name, .. } = self.gadget(*idx);
                             (
                                 (*name, rnd.clone()),
                                 rnd_gadget2input[idx.index()][rnd]
@@ -683,7 +642,7 @@ impl<'a, 'b> UGIGraph<'a, 'b, AEdge<'a>> {
                         },
                     ));
                 } else {
-                    let TGadget { name, .. } = self.gadget(uses[0].0);
+                    let GadgetNode { name, .. } = self.gadget(uses[0].0);
                     res.insert(*in_rnd, (*name, uses[0].1));
                 }
             }
@@ -694,6 +653,42 @@ impl<'a, 'b> UGIGraph<'a, 'b, AEdge<'a>> {
         Ok(res)
     }
 
+    pub fn check_randomness_usage(
+        &self,
+        controls: &mut clk_vcd::ModuleControls,
+    ) -> CResult<'a, ()> {
+        for (rnd, lats) in self.internals.gadget.randoms.iter() {
+            if lats.is_none() {
+                return Err(CompError::missing_annotation(
+                    &self.internals.gadget.module,
+                    rnd.port_name,
+                    "psim_latency",
+                )
+                .into());
+            }
+        }
+        let errors = self
+            .randoms_input_timing(controls)?
+            .keys()
+            .filter(|(rnd, lat)| {
+                !self.internals.gadget.randoms[rnd]
+                    .as_ref()
+                    .unwrap()
+                    .contains(lat)
+            })
+            .map(|(rnd, lat)| {
+                CompError::ref_nw(
+                    &self.internals.gadget.module,
+                    CompErrorKind::Other(format!(
+                        "Random input {} is used at cycle {} while not valid at that cycle.",
+                        rnd, lat
+                    )),
+                )
+            })
+            .collect::<Vec<_>>();
+        CompErrors::result(errors)
+    }
+
     /// Verifies that there is no any more sensitive state in the circuit after n_cycles.
     pub fn check_state_cleared(&self) -> CResult<'a, ()> {
         let errors = self
@@ -701,14 +696,14 @@ impl<'a, 'b> UGIGraph<'a, 'b, AEdge<'a>> {
             .filter(|(idx, _)| self.gadget_sensitive(*idx))
             .flat_map(|(idx, gadget)| {
                 self.g_outputs(idx).filter_map(move |e| {
-                    let out_lat = gadget.base.kind.outputs[&e.weight().edge.0];
+                    let out_lat = gadget.base.kind.outputs[&e.weight().edge.output];
                     if gadget.name.1 + out_lat > self.n_cycles - 1 {
                         Some(CompError::ref_nw(
                             &self.internals.gadget.module,
                             CompErrorKind::LateOutput(
                                 gadget.name.1 + out_lat - self.n_cycles + 1,
                                 (*gadget.name.0.get()).to_owned(),
-                                e.weight().edge.0,
+                                e.weight().edge.output,
                             ),
                         ))
                     } else {
@@ -717,11 +712,7 @@ impl<'a, 'b> UGIGraph<'a, 'b, AEdge<'a>> {
                 })
             })
             .collect::<Vec<_>>();
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(CompErrors::new(errors))
-        }
+        CompErrors::result(errors)
     }
 
     /// Iterator over sensitive gadgets.
@@ -808,4 +799,66 @@ fn random_to_input<'a, 'b>(
         };
         trandom_w.push(rnd_to_add);
     }
+}
+
+/// Build a map random input -> timed random connections for a gadget.
+fn random_connections<'a, 'b>(
+    sgi: &gadget_internals::GadgetInstance<'a, 'b>,
+    cycle: u32,
+) -> CResult<'a, HashMap<TRandom<'a>, TRndConnection<'a>>> {
+    let mut res = HashMap::new();
+    for (r_name, random_lats) in sgi.kind.randoms.iter() {
+        match random_lats {
+            Some(random_lats) => {
+                for lat in random_lats.iter() {
+                    res.insert(
+                        (*r_name, *lat),
+                        (sgi.random_connections[r_name], lat + cycle),
+                    );
+                }
+            }
+            None => {
+                Err(CompError::ref_sn(
+                    sgi.kind.module,
+                    &r_name.port_name,
+                    CompErrorKind::MissingAnnotation("psim_lat".to_owned()),
+                ))?;
+            }
+        }
+    }
+    Ok(res)
+}
+
+/// Find the source GadgetFlow node for a Connection at the given cycle.
+fn time_connection<'a, 'b>(
+    conn: &gadget_internals::Connection<'a>,
+    internals: &gadget_internals::GadgetInternals<'a, 'b>,
+    src_latency: Latency,
+    cycle: Latency,
+    n_cycles: Latency,
+    i_nodes: &Vec<NodeIndex>,
+    g_nodes: &HashMap<Name<'a>, NodeIndex>,
+    inv_node: NodeIndex,
+) -> (NodeIndex, Sharing<'a>) {
+    match conn {
+        Connection::GadgetOutput {
+            gadget_name,
+            output,
+        } => {
+            let output_latency = internals.subgadgets[gadget_name].kind.outputs[output];
+            if let Some(ref_cycle) = (cycle + src_latency)
+                .checked_sub(output_latency)
+                .filter(|ref_cycle| *ref_cycle < n_cycles)
+            {
+                return (g_nodes[&(*gadget_name, ref_cycle)], *output);
+            }
+        }
+        Connection::Input(input) => {
+            let in_lat = src_latency + cycle;
+            if internals.gadget.inputs[input].contains(&in_lat) {
+                return (i_nodes[in_lat as usize], *input);
+            }
+        }
+    }
+    (inv_node, EMPTY_SHARING)
 }

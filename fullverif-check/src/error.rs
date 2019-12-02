@@ -110,6 +110,13 @@ impl<'a> CompErrors<'a> {
         errors.sort_unstable();
         Self(errors)
     }
+    pub fn result(errors: Vec<CompError<'a>>) -> CResult<'a, ()> {
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(Self::new(errors))
+        }
+    }
 }
 
 impl<'a> From<CompError<'a>> for CompErrors<'a> {

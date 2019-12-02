@@ -64,13 +64,15 @@ fn check_gadget<'a, 'b>(
     gadgets: &'b gadgets::Gadgets<'a>,
     gadget_name: gadgets::GKind<'a>,
     check_state_cleared: bool,
+    check_rnd_annot: bool,
     controls: &mut clk_vcd::ModuleControls,
-) -> CResult<'a, Option<tg_graph::AUGIGraph<'a, 'b>>> {
+) -> CResult<'a, Option<tg_graph::AGadgetFlow<'a, 'b>>> {
     let gadget = &gadgets[&gadget_name];
     match gadget.strat {
         netlist::GadgetStrat::Assumed => Ok(None),
         netlist::GadgetStrat::Isolate => {
             println!("Checking gadget {}...", gadget_name);
+            println!("Warning: latency annotations correctness is not verified under the 'isolate' strategy, only isolation is verified");
             if gadget.prop != netlist::GadgetProp::Affine {
                 Err(CompError::ref_nw(
                     gadget.module,
@@ -107,7 +109,7 @@ fn check_gadget<'a, 'b>(
             println!("final n_cycles: {}", n_cycles);
             println!("Loaded simulation states.");
             println!("to graph...");
-            let graph = tg_graph::UGIGraph::unroll(gadget_internals.clone(), n_cycles)?;
+            let graph = tg_graph::BGadgetFlow::unroll(gadget_internals.clone(), n_cycles)?;
             let _a_graph = graph.annotate(controls)?;
             println!("annotation done");
             if false {
@@ -135,6 +137,9 @@ fn check_gadget<'a, 'b>(
                 for (rnd, offsets) in times {
                     println!("\t{}: {}", rnd, offsets);
                 }
+            }
+            if check_rnd_annot {
+                _a_graph.check_randomness_usage(controls)?;
             }
             if check_state_cleared {
                 _a_graph.check_state_cleared()?;
@@ -204,7 +209,13 @@ fn check_gadget_top<'a>(
         .into());
     }
 
-    let g_graph = check_gadget(&gadgets, gadget_name, check_state_cleared, &mut controls)?;
+    let g_graph = check_gadget(
+        &gadgets,
+        gadget_name,
+        check_state_cleared,
+        false,
+        &mut controls,
+    )?;
     let g_graph = if let Some(x) = g_graph {
         x
     } else {
@@ -235,7 +246,13 @@ fn check_gadget_top<'a>(
             continue;
         }
 
-        let ur_sg = check_gadget(&gadgets, sg_name, check_state_cleared, &mut sg_controls)?;
+        let ur_sg = check_gadget(
+            &gadgets,
+            sg_name,
+            check_state_cleared,
+            true,
+            &mut sg_controls,
+        )?;
         if let Some(ur_sg) = ur_sg {
             // Should also check "only glitch" gadgets
             for ((name, cycle), base) in ur_sg.sensitive_gadgets() {
