@@ -62,5 +62,5 @@ echo "Simulation finished"
 
 echo "Starting fullverif..."
 $FULL_VERIF --json $SYNTH_BASE.json --vcd $VCD_PATH --tb $TB_MODULE --gname $MAIN_MODULE --in-valid $IN_VALID --clock $CLOCK --dut $DUT
-echo "fullverif finished."
+#echo "fullverif finished."
 

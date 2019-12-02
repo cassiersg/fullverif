@@ -662,7 +662,7 @@ impl<'a, 'b> GadgetFlow<'a, 'b, AEdge<'a>> {
                 return Err(CompError::missing_annotation(
                     &self.internals.gadget.module,
                     rnd.port_name,
-                    "psim_latency",
+                    "fv_latency",
                 )
                 .into());
             }
@@ -821,7 +821,7 @@ fn random_connections<'a, 'b>(
                 Err(CompError::ref_sn(
                     sgi.kind.module,
                     &r_name.port_name,
-                    CompErrorKind::MissingAnnotation("psim_lat".to_owned()),
+                    CompErrorKind::MissingAnnotation("fv_lat".to_owned()),
                 ))?;
             }
         }

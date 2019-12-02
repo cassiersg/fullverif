@@ -71,7 +71,7 @@ fn module2gadget<'a>(
     } else {
         return Err(CompError::ref_nw(
             module,
-            CompErrorKind::MissingAnnotation("psim_prop".to_owned()),
+            CompErrorKind::MissingAnnotation("fv_prop".to_owned()),
         ));
     };
     // Decide if gadget is composite or not.

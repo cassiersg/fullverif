@@ -29,7 +29,7 @@ yosys techmap -map $TECHMAP_PATH;
 
 # Flatten all user-level module whose check strategy is 'flatten'
 yosys setattr -mod -set keep_hierarchy 1 *;
-yosys setattr -mod -unset keep_hierarchy A:psim_strat=flatten;
+yosys setattr -mod -unset keep_hierarchy A:fv_strat=flatten;
 yosys flatten;
 
 # Output the result in verilog (for simulation) and json (for analysis).

@@ -158,31 +158,31 @@ pub fn net_attributes<'a>(
     netname: &str,
 ) -> Result<WireAttrs, CompError<'a>> {
     let net = &module.netnames[netname];
-    let psim_type = net.attributes.get("psim_type");
-    let psim_count = get_int_attr(module, netname, "psim_count")?;
-    match psim_type {
+    let fv_type = net.attributes.get("fv_type");
+    let fv_count = get_int_attr(module, netname, "fv_count")?;
+    match fv_type {
         Some(yosys::AttributeVal::S(kind)) if kind == "sharing" => {
-            let latencies = get_latencies(module, netname, "psim_latency", "psim_latencies")?;
+            let latencies = get_latencies(module, netname, "fv_latency", "fv_latencies")?;
             Ok(WireAttrs::Sharing {
                 latencies,
-                count: psim_count.unwrap_or(1),
+                count: fv_count.unwrap_or(1),
             })
         }
         Some(yosys::AttributeVal::S(kind)) if kind == "random" => {
-            let psim_count = psim_count
-                .ok_or_else(|| CompError::missing_annotation(module, netname, "psim_count"))?;
-            if psim_count == 0 {
+            let fv_count = fv_count
+                .ok_or_else(|| CompError::missing_annotation(module, netname, "fv_count"))?;
+            if fv_count == 0 {
                 Ok(WireAttrs::Random(vec![None; net.bits.len()]))
             } else {
                 let mut res = Vec::new();
-                for i in 0..psim_count {
+                for i in 0..fv_count {
                     let n_bits =
-                        get_int_attr_needed(module, netname, &format!("psim_rnd_count_{}", i))?;
+                        get_int_attr_needed(module, netname, &format!("fv_rnd_count_{}", i))?;
                     let latencies = get_latencies(
                         module,
                         netname,
-                        &format!("psim_rnd_lat_{}", i),
-                        &format!("psim_rnd_lats_{}", i),
+                        &format!("fv_rnd_lat_{}", i),
+                        &format!("fv_rnd_lats_{}", i),
                     )?;
                     for _ in 0..n_bits {
                         res.push(Some(latencies.clone()));
@@ -216,7 +216,7 @@ pub fn net_attributes<'a>(
 pub fn module_prop<'a>(module: &yosys::Module) -> Result<Option<GadgetProp>, CompError<'a>> {
     module
         .attributes
-        .get("psim_prop")
+        .get("fv_prop")
         .map(|prop| match prop {
             yosys::AttributeVal::S(attr) if attr == "_mux" => Ok(GadgetProp::Mux),
             yosys::AttributeVal::S(attr) if attr == "affine" => Ok(GadgetProp::Affine),
@@ -226,7 +226,7 @@ pub fn module_prop<'a>(module: &yosys::Module) -> Result<Option<GadgetProp>, Com
             attr => Err(CompError {
                 module: Some(module.clone()),
                 net: None,
-                kind: CompErrorKind::WrongAnnotation("psim_prop".to_owned(), attr.clone()),
+                kind: CompErrorKind::WrongAnnotation("fv_prop".to_owned(), attr.clone()),
             }),
         })
         .transpose()
@@ -235,10 +235,10 @@ pub fn module_prop<'a>(module: &yosys::Module) -> Result<Option<GadgetProp>, Com
 /// Get the security proof strategy for the module.
 /// Returns Err if the annotation is invalid of missing.
 pub fn module_strat<'a>(module: &yosys::Module) -> Result<GadgetStrat, CompError<'a>> {
-    match module.attributes.get("psim_strat").ok_or_else(|| {
+    match module.attributes.get("fv_strat").ok_or_else(|| {
         CompError::ref_nw(
             module,
-            CompErrorKind::MissingAnnotation("psim_strat".to_owned()),
+            CompErrorKind::MissingAnnotation("fv_strat".to_owned()),
         )
     })? {
         yosys::AttributeVal::S(attr) if attr == "assumed" => Ok(GadgetStrat::Assumed),
@@ -246,7 +246,7 @@ pub fn module_strat<'a>(module: &yosys::Module) -> Result<GadgetStrat, CompError
         yosys::AttributeVal::S(attr) if attr == "isolate" => Ok(GadgetStrat::Isolate),
         attr => Err(CompError::ref_nw(
             module,
-            CompErrorKind::WrongAnnotation("psim_strat".to_owned(), attr.clone()),
+            CompErrorKind::WrongAnnotation("fv_strat".to_owned(), attr.clone()),
         )),
     }
 }
@@ -254,16 +254,16 @@ pub fn module_strat<'a>(module: &yosys::Module) -> Result<GadgetStrat, CompError
 /// Get the masking number of shares of a module.
 /// Returns Err if the annotation is invalid of missing.
 pub fn module_order<'a>(module: &yosys::Module) -> Result<u32, CompError<'a>> {
-    match module.attributes.get("psim_order").ok_or_else(|| {
+    match module.attributes.get("fv_order").ok_or_else(|| {
         CompError::ref_nw(
             module,
-            CompErrorKind::MissingAnnotation("psim_order".to_owned()),
+            CompErrorKind::MissingAnnotation("fv_order".to_owned()),
         )
     })? {
         yosys::AttributeVal::N(order) if *order >= 1 => Ok(*order as u32),
         attr => Err(CompError::ref_nw(
             module,
-            CompErrorKind::WrongAnnotation("psim_order".to_owned(), attr.clone()),
+            CompErrorKind::WrongAnnotation("fv_order".to_owned(), attr.clone()),
         )),
     }
 }
