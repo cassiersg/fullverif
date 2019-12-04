@@ -186,7 +186,19 @@ fn check_gadget_top<'a>(
     let mut controls = clk_vcd::ModuleControls::from_enable(&vcd_states, dut_path, &in_valid_path)?;
 
     let n_cycles = controls.len() as gadgets::Latency;
-    let max_delay_output = gadgets[&gadget_name].max_output_lat();
+    let max_delay_output = if let Some(g) = gadgets.get(&gadget_name) {
+        g.max_output_lat()
+    } else {
+        return Err(CompError {
+            module: None,
+            net: None,
+            kind: CompErrorKind::Other(format!(
+                "Cannot find gadget {} in the netlist. Does it have the fv_prop annotation ?",
+                gadget_name
+            )),
+        }
+        .into());
+    };
     if (max_delay_output + 1 > n_cycles)
         || (max_delay_output + 1 >= n_cycles && check_state_cleared)
     {

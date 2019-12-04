@@ -25,11 +25,17 @@ pub type TRndConnection<'a> = (RndConnection<'a>, Latency);
 type RndTrace<'a> = Vec<(RndConnection<'a>, gadgets::Latency)>;
 
 /// A gadget in the GadgetFlow
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct GadgetNode<'a, 'b> {
     base: gadget_internals::GadgetInstance<'a, 'b>,
-    name: (GName<'a>, Latency),
+    name: Name<'a>,
     random_connections: HashMap<TRandom<'a>, TRndConnection<'a>>,
+}
+
+impl<'a, 'b> std::fmt::Debug for GadgetNode<'a, 'b> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "GadgetNode({:?})", self.name)
+    }
 }
 
 /// A node in the GadgetFlow: gadget, input, output or invalid
@@ -69,6 +75,7 @@ pub struct Edge<'a> {
     input: Input<'a>,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 /// An edge in the annotated FlowGraph
 pub struct AEdge<'a> {
     edge: Edge<'a>,
@@ -170,6 +177,18 @@ impl<'a, 'b, E> GadgetFlow<'a, 'b, E> {
         } else {
             panic!("Gadget at index {:?} is not a gadget.", idx)
         }
+    }
+}
+
+impl<'a, 'b, E: std::fmt::Debug> GadgetFlow<'a, 'b, E> {
+    /// Show an edge
+    fn disp_edge(&self, e: petgraph::graph::EdgeReference<E>) -> String {
+        format!(
+            "from {:?} to {:?}, {:?}",
+            self.gadgets[e.source()],
+            self.gadgets[e.target()],
+            e.weight()
+        )
     }
 }
 
@@ -318,6 +337,7 @@ impl<'a, 'b> BGadgetFlow<'a, 'b> {
                             for e_i in self.g_inputs(*idx) {
                                 let Sharing { pos, .. } = &e_i.weight().input.0;
                                 let output = outputs[*pos as usize].unwrap();
+                                edges_valid[output] = Some(false);
                                 let sens_new = edges_sensitive[e_i.id().index()].unwrap();
                                 let sens = edges_sensitive[output].get_or_insert(Sensitive::No);
                                 *sens = (*sens).max(sens_new);
@@ -325,7 +345,13 @@ impl<'a, 'b> BGadgetFlow<'a, 'b> {
                         }
                     } else {
                         let g_valid = self.g_inputs(*idx).all(|e| {
-                            edges_valid[e.id().index()].expect("Non-initialized validity")
+                            edges_valid[e.id().index()].unwrap_or_else(|| {
+                                panic!(
+                                "Non-initialized validity for edge {}, src node pos: {:?}, target node pos: {:?}",
+                                self.disp_edge(e),
+                                sorted_nodes.iter().find(|x| **x== e.source()),
+                                sorted_nodes.iter().find(|x| **x == e.target()),
+                            );})
                         });
                         let g_sensitive = self
                             .g_inputs(*idx)
@@ -365,6 +391,18 @@ impl<'a, 'b> BGadgetFlow<'a, 'b> {
                         edges_sensitive[e.id().index()] = Some(Sensitive::No);
                     }
                 }
+            }
+            for e in self.g_outputs(*idx) {
+                assert!(
+                    edges_valid[e.id().index()].is_some(),
+                    "Failed init valid for edge {}",
+                    self.disp_edge(e)
+                );
+                assert!(
+                    edges_sensitive[e.id().index()].is_some(),
+                    "Failed init sensitive for edge {}",
+                    self.disp_edge(e)
+                );
             }
         }
         // move sensitivity to full form
@@ -438,7 +476,7 @@ impl<'a, 'b> BGadgetFlow<'a, 'b> {
     }
 }
 
-impl<'a, 'b> GadgetFlow<'a, 'b, AEdge<'a>> {
+impl<'a, 'b> AGadgetFlow<'a, 'b> {
     /// Is the gadget n valid, that is, are all the inputs of node n valid ?
     fn gadget_valid(&self, n: NodeIndex) -> bool {
         self.g_inputs(n).all(|e| e.weight().valid)
@@ -581,33 +619,33 @@ impl<'a, 'b> GadgetFlow<'a, 'b, AEdge<'a>> {
         &self,
         controls: &mut clk_vcd::ModuleControls,
     ) -> CResult<'a, HashMap<TRandom<'a>, (Name<'a>, TRandom<'a>)>> {
-        let mut rnd_gadget2input: Vec<
-            HashMap<TRandom<'a>, CResult<'a, (TRandom<'a>, RndTrace<'a>)>>,
-        > = vec![HashMap::new(); self.gadgets.node_count()];
+        let mut rnd_gadget2input: Vec<HashMap<TRandom<'a>, Option<TRandom<'a>>>> =
+            vec![HashMap::new(); self.gadgets.node_count()];
         let mut name_cache = HashMap::new();
         let mut errors: Vec<CompError<'a>> = Vec::new();
+        println!("starting randoms_input_timing");
+        let mut i = 0;
         for (idx, gadget) in self.gadgets() {
-            for (conn, trandom) in gadget.random_connections.iter() {
-                let rnd_in = random_to_input(
-                    &self.internals,
-                    controls,
-                    trandom,
-                    &gadget.name,
-                    conn,
-                    &mut name_cache,
-                );
+            for conn in gadget.random_connections.keys() {
+                i += 1;
+                let rnd_in =
+                    random_to_input(&self.internals, controls, gadget, conn, &mut name_cache);
                 if let Err(e) = &rnd_in {
                     if self.gadget_sensitive(idx) {
                         errors.extend_from_slice(&e.0);
                     }
                 }
-                rnd_gadget2input[idx.index()].insert(*conn, rnd_in);
+                rnd_gadget2input[idx.index()].insert(*conn, rnd_in.ok().map(|x| x.0));
             }
         }
+        if !errors.is_empty() {
+            return Err(CompErrors::new(errors));
+        }
+        println!("rnd_gadget2input done, i: {}", i);
         let mut rnd_input2use: HashMap<TRandom<'a>, Vec<(NodeIndex, TRandom<'a>)>> = HashMap::new();
         for (idx, rnd2input) in rnd_gadget2input.iter().enumerate() {
             for (rnd, rnd_input) in rnd2input.iter() {
-                if let Ok((input, _)) = rnd_input {
+                if let Some(input) = rnd_input {
                     rnd_input2use
                         .entry(*input)
                         .or_default()
@@ -615,6 +653,7 @@ impl<'a, 'b> GadgetFlow<'a, 'b, AEdge<'a>> {
                 }
             }
         }
+        println!("rnd_input2use done");
         let mut res: HashMap<TRandom<'a>, (Name<'a>, TRandom<'a>)> = HashMap::new();
         for (in_rnd, uses) in rnd_input2use.iter() {
             assert!(!uses.is_empty());
@@ -623,14 +662,18 @@ impl<'a, 'b> GadgetFlow<'a, 'b, AEdge<'a>> {
                     let random_uses = uses
                         .iter()
                         .map(|(idx, rnd)| {
-                            let GadgetNode { name, .. } = self.gadget(*idx);
+                            let gadget = self.gadget(*idx);
                             (
-                                (*name, rnd.clone()),
-                                rnd_gadget2input[idx.index()][rnd]
-                                    .as_ref()
-                                    .unwrap()
-                                    .1
-                                    .clone(),
+                                (gadget.name, rnd.clone()),
+                                random_to_input(
+                                    &self.internals,
+                                    controls,
+                                    gadget,
+                                    rnd,
+                                    &mut name_cache,
+                                )
+                                .unwrap()
+                                .1,
                             )
                         })
                         .collect::<Vec<_>>();
@@ -647,6 +690,7 @@ impl<'a, 'b> GadgetFlow<'a, 'b, AEdge<'a>> {
                 }
             }
         }
+        println!("res done");
         if !errors.is_empty() {
             return Err(CompErrors::new(errors));
         }
@@ -738,19 +782,19 @@ fn compute_sensitivity<'a>(inputs: impl Iterator<Item = (Sensitive, Input<'a>)>)
 fn random_to_input<'a, 'b>(
     internals: &gadget_internals::GadgetInternals<'a, 'b>,
     controls: &mut clk_vcd::ModuleControls,
-    trandom: &TRndConnection<'a>,
-    sg_name: &Name<'a>,
+    gadget: &GadgetNode<'a, 'b>,
     rnd_name: &TRandom<'a>,
     names_cache: &mut HashMap<&'a str, (&'a str, usize)>,
-) -> CResult<'a, (TRandom<'a>, Vec<(RndConnection<'a>, gadgets::Latency)>)> {
+) -> CResult<'a, (TRandom<'a>, RndTrace<'a>)> {
     let module = internals.gadget.module;
+    let trandom = &gadget.random_connections[rnd_name];
     let mut trandom_w: Vec<(RndConnection<'a>, gadgets::Latency)> = vec![(trandom.0, trandom.1)];
     loop {
         let rnd_to_add = match &trandom_w[trandom_w.len() - 1] {
             (RndConnection::Invalid(bit), _) => {
                 return Err(CompError::ref_nw(
                     module,
-                    CompErrorKind::InvalidRandom(trandom_w.clone(), *sg_name, *rnd_name, *bit),
+                    CompErrorKind::InvalidRandom(trandom_w.clone(), gadget.name, *rnd_name, *bit),
                 )
                 .into());
             }
@@ -760,7 +804,7 @@ fn random_to_input<'a, 'b>(
             (RndConnection::Gate(gate_id), cycle) => match &internals.rnd_gates[&gate_id] {
                 gadget_internals::RndGate::Reg { input: new_conn } => {
                     if *cycle == 0 {
-                        Err(CompError::ref_nw(module, CompErrorKind::Other(format!("Randomness for random {:?} of gadget {:?} comes from a cycle before cycle 0 (through reg {:?})", rnd_name, sg_name, gate_id))))?;
+                        Err(CompError::ref_nw(module, CompErrorKind::Other(format!("Randomness for random {:?} of gadget {:?} comes from a cycle before cycle 0 (through reg {:?})", rnd_name, gadget.name, gate_id))))?;
                     }
                     (*new_conn, cycle - 1)
                 }
@@ -777,7 +821,7 @@ fn random_to_input<'a, 'b>(
                                 module,
                                 CompErrorKind::Other(format!(
                                     "Random comes from a late gate for gadget {:?}",
-                                    sg_name
+                                    gadget.name
                                 )),
                             )
                             .into());
