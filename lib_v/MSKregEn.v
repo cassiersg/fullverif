@@ -1,10 +1,10 @@
-(* psim_strat = "flatten" *)
+(* fv_strat = "flatten" *)
 module MSKregEn #(parameter d=1, parameter count=1) (clk, en, in, out);
 
-(* psim_type = "clock" *)   input clk;
-(* psim_type = "control" *) input en;
-(* psim_type = "sharing", psim_latency = 0, psim_count=count *) input  [count*d-1:0] in;
-(* psim_type = "sharing", psim_latency = 1, psim_count=count *) output [count*d-1:0] out;
+(* fv_type = "clock" *)   input clk;
+(* fv_type = "control" *) input en;
+(* fv_type = "sharing", fv_latency = 0, fv_count=count *) input  [count*d-1:0] in;
+(* fv_type = "sharing", fv_latency = 1, fv_count=count *) output [count*d-1:0] out;
 
 wire [count*d-1:0] reg_in;
 

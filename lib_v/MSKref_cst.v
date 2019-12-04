@@ -2,10 +2,10 @@ module MSKref_cst #(parameter d=2) (in, clk, out, rnd);
 
 `include "MSKref_cst.inc"
 
-(* psim_type="sharing", psim_latency=2 *) input [d-1:0] in;
-(* psim_type="sharing", psim_latency=3 *) output reg [d-1:0] out;
-(* psim_type="clock" *) input clk;
-(* psim_type= "random", psim_count=1, psim_rnd_lat_0 = 0, psim_rnd_count_0 = ref_n_rnd *)
+(* fv_type="sharing", fv_latency=2 *) input [d-1:0] in;
+(* fv_type="sharing", fv_latency=3 *) output reg [d-1:0] out;
+(* fv_type="clock" *) input clk;
+(* fv_type= "random", fv_count=1, fv_rnd_lat_0 = 0, fv_rnd_count_0 = ref_n_rnd *)
 input [ref_n_rnd-1:0] rnd;
 
 reg [d-1:0] share0;

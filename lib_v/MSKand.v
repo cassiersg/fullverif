@@ -2,10 +2,10 @@ module MSKand #(parameter d=2) (ina, inb, rnd, clk, out);
 
 	localparam n_rnd=d*(d-1)/2;
 
-	(* psim_type = "sharing", psim_latency = 0 *) input  [d-1:0] ina, inb;
-	(* psim_type = "random", psim_count = 1, psim_rnd_lat_0 = 0, psim_rnd_count_0 = n_rnd *) input [n_rnd-1:0] rnd;
-	(* psim_type = "clock" *) input clk;
-	(* psim_type = "sharing", psim_latency = 1 *) output [d-1:0] out;
+	(* fv_type = "sharing", fv_latency = 0 *) input  [d-1:0] ina, inb;
+	(* fv_type = "random", fv_count = 1, fv_rnd_lat_0 = 0, fv_rnd_count_0 = n_rnd *) input [n_rnd-1:0] rnd;
+	(* fv_type = "clock" *) input clk;
+	(* fv_type = "sharing", fv_latency = 1 *) output [d-1:0] out;
 
 	genvar i,j;
 

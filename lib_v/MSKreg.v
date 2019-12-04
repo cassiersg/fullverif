@@ -1,9 +1,9 @@
-(* psim_prop = "affine", psim_strat="isolate", psim_order=d *)
+(* fv_prop = "affine", fv_strat="isolate", fv_order=d *)
 module MSKreg #(parameter d=1, parameter count=1) (clk, in, out);
 
-(* psim_type = "clock" *)   input clk;
-(* psim_type = "sharing", psim_latency = 0, psim_count=count *) input  [count*d-1:0] in;
-(* psim_type = "sharing", psim_latency = 1, psim_count=count *) output [count*d-1:0] out;
+(* fv_type = "clock" *)   input clk;
+(* fv_type = "sharing", fv_latency = 0, fv_count=count *) input  [count*d-1:0] in;
+(* fv_type = "sharing", fv_latency = 1, fv_count=count *) output [count*d-1:0] out;
 
 reg [count*d-1:0] state;
 

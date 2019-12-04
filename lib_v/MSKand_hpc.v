@@ -1,13 +1,13 @@
-(* psim_prop = "PINI", psim_strat = "assumed", psim_order=d *)
+(* fv_prop = "PINI", fv_strat = "assumed", fv_order=d *)
 module MSKand_hpc #(parameter d=2) (ina, inb, rnd, clk, out);
 
 	`include "MSKand_hpc.inc"
 
-	(* psim_type = "sharing", psim_latency = 3 *) input  [d-1:0] ina;
-	(* psim_type = "sharing", psim_latency = 2 *) input  [d-1:0] inb;
-	(* psim_type = "sharing", psim_latency = 4 *) output [d-1:0] out;
-	(* psim_type = "clock" *) input clk;
-        (* psim_type = "random", psim_count=1, psim_rnd_lat_0=0, psim_rnd_count_0=and_pini_nrnd *)
+	(* fv_type = "sharing", fv_latency = 3 *) input  [d-1:0] ina;
+	(* fv_type = "sharing", fv_latency = 2 *) input  [d-1:0] inb;
+	(* fv_type = "sharing", fv_latency = 4 *) output [d-1:0] out;
+	(* fv_type = "clock" *) input clk;
+        (* fv_type = "random", fv_count=1, fv_rnd_lat_0=0, fv_rnd_count_0=and_pini_nrnd *)
         input [and_pini_nrnd-1:0] rnd;
 
 	wire [d-1:0] inb_ref;
