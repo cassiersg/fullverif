@@ -684,6 +684,9 @@ impl<'a, 'b> AGadgetFlow<'a, 'b> {
                             uses: random_uses,
                         },
                     ));
+                    if errors.len() >= 100 {
+                        break;
+                    }
                 } else {
                     let GadgetNode { name, .. } = self.gadget(uses[0].0);
                     res.insert(*in_rnd, (*name, uses[0].1));

@@ -164,7 +164,7 @@ impl<'a, 'b> GadgetInternals<'a, 'b> {
                 entry.insert(sharing);
             } else {
                 return Err(CompErrors::new(vec![CompError {
-                    module: Some(gadget.module.clone()),
+                    module: Some(gadget.module),
                     net: Some(
                         gadget
                             .module

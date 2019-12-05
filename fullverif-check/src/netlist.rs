@@ -11,7 +11,7 @@ use yosys_netlist_json as yosys;
 /// If the attribute is not present, return None.
 /// If it has not the correct type (or overflows), return and Err.
 fn get_int_attr<'a>(
-    module: &yosys::Module,
+    module: &'a yosys::Module,
     netname: &str,
     attr: &str,
 ) -> Result<Option<u32>, CompError<'a>> {
@@ -33,7 +33,7 @@ fn get_int_attr<'a>(
 
 /// See get_int_attr but returns Err if the attribute is not present.
 fn get_int_attr_needed<'a>(
-    module: &yosys::Module,
+    module: &'a yosys::Module,
     netname: &str,
     attr: &str,
 ) -> Result<u32, CompError<'a>> {
@@ -45,7 +45,7 @@ fn get_int_attr_needed<'a>(
 /// The attribute should be an arbitrary-length bit vector (i.e., any int).
 /// We return the result as a LE bit Vec<bool>
 fn get_bitstring_attr<'a>(
-    module: &yosys::Module,
+    module: &'a yosys::Module,
     netname: &str,
     attr: &str,
 ) -> Result<Option<Vec<bool>>, CompError<'a>> {
@@ -123,7 +123,7 @@ pub enum GadgetStrat {
 
 /// Get values for the latency annotation of a port.
 fn get_latencies<'a>(
-    module: &yosys::Module,
+    module: &'a yosys::Module,
     netname: &str,
     attr_latency: &str,
     attr_latencies: &str,
@@ -154,7 +154,7 @@ fn get_latencies<'a>(
 
 /// Get the type of a port.
 pub fn net_attributes<'a>(
-    module: &yosys::Module,
+    module: &'a yosys::Module,
     netname: &str,
 ) -> Result<WireAttrs, CompError<'a>> {
     let net = &module.netnames[netname];
@@ -213,7 +213,7 @@ pub fn net_attributes<'a>(
 
 /// Get the security property annotation of a module.
 /// Returns None if not specified, Err if invalid.
-pub fn module_prop<'a>(module: &yosys::Module) -> Result<Option<GadgetProp>, CompError<'a>> {
+pub fn module_prop<'a>(module: &'a yosys::Module) -> Result<Option<GadgetProp>, CompError<'a>> {
     module
         .attributes
         .get("fv_prop")
@@ -224,7 +224,7 @@ pub fn module_prop<'a>(module: &yosys::Module) -> Result<Option<GadgetProp>, Com
             yosys::AttributeVal::S(attr) if attr == "PINI" => Ok(GadgetProp::PINI),
             yosys::AttributeVal::S(attr) if attr == "SNI" => Ok(GadgetProp::SNI),
             attr => Err(CompError {
-                module: Some(module.clone()),
+                module: Some(module),
                 net: None,
                 kind: CompErrorKind::WrongAnnotation("fv_prop".to_owned(), attr.clone()),
             }),
@@ -234,7 +234,7 @@ pub fn module_prop<'a>(module: &yosys::Module) -> Result<Option<GadgetProp>, Com
 
 /// Get the security proof strategy for the module.
 /// Returns Err if the annotation is invalid of missing.
-pub fn module_strat<'a>(module: &yosys::Module) -> Result<GadgetStrat, CompError<'a>> {
+pub fn module_strat<'a>(module: &'a yosys::Module) -> Result<GadgetStrat, CompError<'a>> {
     match module.attributes.get("fv_strat").ok_or_else(|| {
         CompError::ref_nw(
             module,
@@ -253,7 +253,7 @@ pub fn module_strat<'a>(module: &yosys::Module) -> Result<GadgetStrat, CompError
 
 /// Get the masking number of shares of a module.
 /// Returns Err if the annotation is invalid of missing.
-pub fn module_order<'a>(module: &yosys::Module) -> Result<u32, CompError<'a>> {
+pub fn module_order<'a>(module: &'a yosys::Module) -> Result<u32, CompError<'a>> {
     match module.attributes.get("fv_order").ok_or_else(|| {
         CompError::ref_nw(
             module,

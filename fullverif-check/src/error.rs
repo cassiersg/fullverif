@@ -24,7 +24,7 @@ pub struct CompError<'a> {
     #[derivative(PartialOrd = "ignore")]
     #[derivative(Ord = "ignore")]
     #[derivative(PartialEq = "ignore")]
-    pub module: Option<yosys::Module>,
+    pub module: Option<&'a yosys::Module>,
     #[derivative(PartialOrd = "ignore")]
     #[derivative(Ord = "ignore")]
     #[derivative(PartialEq = "ignore")]
@@ -126,16 +126,16 @@ impl<'a> From<CompError<'a>> for CompErrors<'a> {
 }
 
 impl<'a> CompError<'a> {
-    pub fn ref_nw(module: &yosys::Module, kind: CompErrorKind<'a>) -> Self {
+    pub fn ref_nw(module: &'a yosys::Module, kind: CompErrorKind<'a>) -> Self {
         Self {
-            module: Some(module.clone()),
+            module: Some(module),
             net: None,
             kind,
         }
     }
-    pub fn ref_sn(module: &yosys::Module, netname: &str, kind: CompErrorKind<'a>) -> Self {
+    pub fn ref_sn(module: &'a yosys::Module, netname: &str, kind: CompErrorKind<'a>) -> Self {
         Self {
-            module: Some(module.clone()),
+            module: Some(module),
             net: Some(module.netnames[netname].clone()),
             kind,
         }
@@ -174,7 +174,7 @@ impl<'a> CompError<'a> {
             kind,
         }
     }
-    pub fn missing_annotation(module: &yosys::Module, netname: &str, attr: &str) -> Self {
+    pub fn missing_annotation(module: &'a yosys::Module, netname: &str, attr: &str) -> Self {
         Self::ref_sn(
             module,
             netname,

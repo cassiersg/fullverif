@@ -152,7 +152,7 @@ fn module2gadget<'a>(
             (attr, yosys::PortDirection::InOut)
             | (attr @ WireAttrs::Random(_), yosys::PortDirection::Output) => {
                 return Err(CompError {
-                    module: Some(module.clone()),
+                    module: Some(module),
                     net: Some(module.netnames[port_name].clone()),
                     kind: CompErrorKind::InvalidPortDirection {
                         attr,

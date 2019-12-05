@@ -203,7 +203,7 @@ fn check_gadget_top<'a>(
         || (max_delay_output + 1 >= n_cycles && check_state_cleared)
     {
         return Err(CompError {
-            module: Some(netlist.modules[*gadget_name.get()].clone()),
+            module: Some(&netlist.modules[*gadget_name.get()]),
             net: None,
             kind: CompErrorKind::Other(format!(
                 "Not enough simulated cycles to check the top-level gadget.\n\
@@ -296,7 +296,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut file_simu = BufReader::new(file_simu);
     let netlist = yosys::Netlist::from_reader(file_synth)?;
     let root_simu_mod = vec![config.tb.clone()];
-    match check_gadget_top(
+    check_gadget_top(
         &netlist,
         &mut file_simu,
         root_simu_mod,
@@ -305,11 +305,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.clk.clone(),
         config.in_valid.clone(),
         config.check_state_cleared,
-    ) {
-        Ok(()) => {}
-        Err(e) => {
-            println!("{}", e);
-        }
-    };
+    )
+    .map_err(|e| format!("{}", e))?;
     Ok(())
 }

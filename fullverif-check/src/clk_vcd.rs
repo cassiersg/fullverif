@@ -24,6 +24,23 @@ pub struct VarId(vcd::IdCode);
 pub struct VcdStates {
     header: vcd::Header,
     states: Vec<State>,
+    cache_ids: std::cell::RefCell<CacheNameIds>,
+}
+
+/// Cache for lookups of path -> ids.
+/// (to improve performance, since vcd::find_var uses linear probing)
+#[derive(Debug, Default)]
+struct CacheNameIds {
+    id: usize,
+    scopes: HashMap<String, CacheNameIds>,
+}
+impl CacheNameIds {
+    fn new(id: usize) -> Self {
+        Self {
+            id,
+            scopes: HashMap::new(),
+        }
+    }
 }
 
 impl VcdStates {
@@ -50,24 +67,82 @@ impl VcdStates {
             clock,
             parser.map(|cmd| cmd.map_err(|_| vcd_error.clone())),
         )?;
-        Ok(Self { header, states })
+        let cache_ids = std::cell::RefCell::new(CacheNameIds::default());
+        Ok(Self {
+            header,
+            states,
+            cache_ids,
+        })
     }
 
     /// VarId from the path (list of strings) of a variable
     pub fn get_var_id<'a>(&self, path: &[impl Borrow<str>]) -> Result<VarId, CompError<'a>> {
-        Ok(VarId(
-            self.header
-                .find_var(path)
-                .ok_or_else(|| CompError {
-                    module: None,
-                    net: None,
-                    kind: CompErrorKind::Other(format!(
-                        "Error: Did not find signal {} in vcd file.",
-                        path.join(".")
-                    )),
-                })?
-                .code,
-        ))
+        let mut cache = self.cache_ids.borrow_mut();
+        let mut dir: &mut CacheNameIds = &mut (*cache);
+        let mut scope: &[vcd::ScopeItem] = &self.header.items;
+        for (path_part, name) in path.iter().enumerate() {
+            let n = name.borrow();
+            if dir.scopes.contains_key(n) {
+                dir = dir.scopes.get_mut(n).unwrap();
+                match &scope[dir.id] {
+                    vcd::ScopeItem::Scope(s) => {
+                        scope = &s.children;
+                    }
+                    vcd::ScopeItem::Var(v) => {
+                        if path_part == path.len() - 1 {
+                            return Ok(VarId(v.code));
+                        } else {
+                            // error
+                            break;
+                        }
+                    }
+                }
+            } else {
+                fn scope_id(s: &vcd::ScopeItem) -> &str {
+                    match s {
+                        vcd::ScopeItem::Var(v) => &v.reference,
+                        vcd::ScopeItem::Scope(s) => &s.identifier,
+                    }
+                }
+                match scope.iter().enumerate().find(|(_, s)| scope_id(s) == n) {
+                    Some((i, s)) => {
+                        dir = dir
+                            .scopes
+                            .entry(scope_id(s).to_owned())
+                            .or_insert(CacheNameIds::new(i));
+                        if let vcd::ScopeItem::Scope(s) = s {
+                            scope = &s.children;
+                        } else {
+                            match &scope[dir.id] {
+                                vcd::ScopeItem::Scope(s) => {
+                                    scope = &s.children;
+                                }
+                                vcd::ScopeItem::Var(v) => {
+                                    if path_part == path.len() - 1 {
+                                        return Ok(VarId(v.code));
+                                    } else {
+                                        // error
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    None => {
+                        break;
+                    }
+                }
+            }
+        }
+        return Err(CompError {
+            module: None,
+            net: None,
+            kind: CompErrorKind::Other(format!(
+                "Error: Did not find signal {} in vcd file.",
+                path.join(".")
+            )),
+        }
+        .into());
     }
 
     /// State of a variable. Returns None if the cycle is too large compared to what was in the vcd.
