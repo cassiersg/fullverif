@@ -56,7 +56,7 @@ echo "Starting simulation..."
 # -y source directory for .v modules
 # -s top-level module (i.e. testbench)
 # -D define VCD_PATH so that the testbench can write the vcd in the correct location
-$IV -y $SIMU_DIR -I $SIMU_DIR -I $FULLVERIF_LIB_DIR -s $TB_MODULE -o $SIM_PATH -D VCD_PATH=\"$VCD_PATH\" $SYNTH_BASE.v $TB_PATH || exit
+$IV -y $SIMU_DIR -y $FULLVERIF_LIB_DIR -I $SIMU_DIR -I $FULLVERIF_LIB_DIR -s $TB_MODULE -o $SIM_PATH -D VCD_PATH=\"$VCD_PATH\" $SYNTH_BASE.v $TB_PATH || exit
 $VVP $SIM_PATH
 echo "Simulation finished"
 
