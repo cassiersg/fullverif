@@ -167,6 +167,8 @@ the LSB. The input is valid at cycle `i` iff `bi` is 1.
 
 ### Structure of fullverif (analysis phase)
 
+#### Composite strategy
+
 In the first stage, fullverif lists the gadgets from the netlist, and reads
 their ports to construct an abstract representation of their interface.
 
@@ -189,24 +191,48 @@ outputs are computed).
 Then, those new gadgets are interconnected, taking the "latency" information
 into account.
 From there on, the sub-gadget graph corresponds more to a computation graph
-than to a physical netlist.
-On this graph, we can then use control signal values obtained from the
-simulation to replace each mux (whose signal is not a sensitive value) gadget
-with the corresponding wiring, then
-analyze which gadget actually compute on valid values (that is, sharings that
-depend on the inputs, and not on the initial state of the circuit, which is
+than to a physical netlist, and we call it a "GadgetFlow" graph.
+Then, the following computations are performed on the GadgetFlow graph:
+* Each edge of the graph is annotated with validity and sensitivity information.
+An edge is valid if it carries a sharing of a variable that depends on the
+inputs of the circuit (and not on the initial state of the circuit, which is
 considered to be invalid).
-Along the way, other check are performed, such as the validity of the output
-sharings at the specified latency.
-The randomness distribution circuit is handled in a similar way.
+An edge is sensitive if the share it carries depend on the input sharings of
+the gadget. (The edge may also by glitch-sensitive: its value is non-sensitive
+but there may be glitches that depend on sensitive variable).
+A gadget is valid if all its inputs are valid, and it is sensitive if any of
+its inputs is sensitive.
+This step makes a special treatment of muxes in order to compute the validity
+and sensitivity of their outputs.
+The validity sensitivity of each and gadget is shown for each cycle.
+This requires knowledge of the control signals of the muxes, which are
+extracted from the result of the simulation.
+* It is checked that the output sharings are valid when the annotations specify
+  the they should be valid. 
+* The randomness usage of each subgadget is traced back (when it is sensitive)
+  to the randomness input of the gadget. It is checked that a fresh random bit
+  needed for a subgadget is not used elsewhere.
+  The list of input random bits used is reported for each cycle and checked
+  against the annotation (if present).
+  The randomness bits tracking is able to handle muxes and registers, but
+  forbids any other gate.
+* It is checked that after the last execution cycle, no sensitive state remains
+  in the circuit in order to prevent unintended leakage from happening
+  afterwards.
 
 The fourth stage actually verifies the abstract composition strategy, based on
-the computation graph (e.g. "Are all sub-gadgets PINI ?").
+the GadgetFlow graph (e.g. "Are all sub-gadgets PINI ?").
 
 Finally, steps 2 to 4 are repeated for each sub-gadget for which the strategy
 is "composite", and the steps are performed for each set of sequences of
 control values in the gadget (the relevant control values are those that are
 used to analyze how muxes behave).
+
+#### Isolate strategy
+
+For gadgets where the strategy is "isolate", it is checked that they can be
+split into `d` sub-circuits, one for each share, such that there is no
+interconnection of shares or randomness between the sub-circuits.
 
 ### Testbench
 
