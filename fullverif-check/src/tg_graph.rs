@@ -465,12 +465,23 @@ impl<'a, 'b> BGadgetFlow<'a, 'b> {
                 self.g_inputs(idx)
                     .map(|e| (edges_sensitive[e.id().index()], e.weight().input)),
             );
+            if noglitch_cycle == 0 {
+                continue;
+            }
             for e in self.g_outputs(idx) {
-                let output_lat = self.gadget(idx).base.kind.outputs[&e.weight().output];
-                if edges_sensitive[e.id().index()] == Sensitive::No && output_lat < noglitch_cycle {
-                    edges_sensitive[e.id().index()] = Sensitive::Glitch;
-                    if self.gadgets[e.target()].is_gadget() {
-                        gl_to_analyze.push(e.target());
+                if edges_sensitive[e.id().index()] == Sensitive::No {
+                    let output_lat = *self
+                        .gadget(idx)
+                        .base
+                        .kind
+                        .outputs
+                        .get(&e.weight().output)
+                        .unwrap();
+                    if output_lat < noglitch_cycle {
+                        edges_sensitive[e.id().index()] = Sensitive::Glitch;
+                        if self.gadgets[e.target()].is_gadget() {
+                            gl_to_analyze.push(e.target());
+                        }
                     }
                 }
             }
