@@ -91,8 +91,8 @@ pub struct GadgetFlow<'a, 'b, E> {
     gadgets: Graph<GFNode<'a, 'b>, E>,
     n_cycles: Latency,
     o_node: petgraph::graph::NodeIndex,
-    #[allow(dead_code)]
-    inv_node: petgraph::graph::NodeIndex,
+    inv_node_in: petgraph::graph::NodeIndex,
+    inv_node_out: petgraph::graph::NodeIndex,
     i_nodes: Vec<petgraph::graph::NodeIndex>,
 }
 
@@ -201,7 +201,8 @@ impl<'a, 'b> BGadgetFlow<'a, 'b> {
     ) -> CResult<'a, Self> {
         let mut gadgets = Graph::new();
         let o_node = gadgets.add_node(GFNode::Output);
-        let inv_node = gadgets.add_node(GFNode::Invalid);
+        let inv_node_in = gadgets.add_node(GFNode::Invalid);
+        let inv_node_out = gadgets.add_node(GFNode::Invalid);
         let i_nodes = (0..n_cycles)
             .map(|lat| gadgets.add_node(GFNode::Input(lat)))
             .collect::<Vec<_>>();
@@ -227,7 +228,7 @@ impl<'a, 'b> BGadgetFlow<'a, 'b> {
                         n_cycles,
                         &i_nodes,
                         &g_nodes,
-                        inv_node,
+                        inv_node_in,
                     );
                     gadgets.add_edge(
                         src_g,
@@ -243,7 +244,14 @@ impl<'a, 'b> BGadgetFlow<'a, 'b> {
         for (output, conn) in internals.output_connections.iter() {
             for cycle in 0..n_cycles {
                 let (src_g, src_o) = time_connection(
-                    conn, &internals, 0, cycle, n_cycles, &i_nodes, &g_nodes, inv_node,
+                    conn,
+                    &internals,
+                    0,
+                    cycle,
+                    n_cycles,
+                    &i_nodes,
+                    &g_nodes,
+                    inv_node_in,
                 );
                 gadgets.add_edge(
                     src_g,
@@ -255,14 +263,38 @@ impl<'a, 'b> BGadgetFlow<'a, 'b> {
                 );
             }
         }
-        Ok(Self {
+        let mut res = Self {
             internals,
             gadgets,
             n_cycles,
             o_node,
-            inv_node,
+            inv_node_in,
+            inv_node_out,
             i_nodes,
-        })
+        };
+        for (name, sgi) in res.internals.subgadgets.iter() {
+            for cycle in 0..n_cycles {
+                let node = g_nodes[&(*name, cycle)];
+                let present_outputs = res
+                    .g_outputs(node)
+                    .map(|e| e.weight().output)
+                    .collect::<HashSet<_>>();
+                for output in sgi.kind.outputs.keys() {
+                    if !present_outputs.contains(&output) {
+                        // output missing: it is not used in any gadget in the valid time range
+                        res.gadgets.add_edge(
+                            node,
+                            inv_node_out,
+                            Edge {
+                                output: *output,
+                                input: (EMPTY_SHARING, 0),
+                            },
+                        );
+                    }
+                }
+            }
+        }
+        return Ok(res);
     }
 
     /// Sort the nodes in the graph, inputs first.
@@ -315,8 +347,13 @@ impl<'a, 'b> BGadgetFlow<'a, 'b> {
             match &self.gadgets[*idx] {
                 GFNode::Gadget(_) => {
                     if let Some(ctrl) = muxes_ctrls.get(idx) {
-                        let mut outputs: Vec<Option<usize>> =
-                            vec![None; self.g_outputs(*idx).count()];
+                        let mut outputs: Vec<Option<usize>> = vec![
+                            None;
+                            self.g_outputs(*idx)
+                                .map(|e| e.weight().output)
+                                .collect::<HashSet<_>>()
+                                .len()
+                        ];
                         for o_e in self.g_outputs(*idx) {
                             let pos = o_e.weight().output.pos as usize;
                             outputs[pos] = Some(o_e.id().index());
@@ -336,6 +373,16 @@ impl<'a, 'b> BGadgetFlow<'a, 'b> {
                         } else {
                             for e_i in self.g_inputs(*idx) {
                                 let Sharing { pos, .. } = &e_i.weight().input.0;
+                                if *pos as usize >= outputs.len() {
+                                    panic!(
+                                        "pos: {}, outputs.len(): {}, name: {:?}, base: {:?}\noutputs:{:?}",
+                                        *pos,
+                                        outputs.len(),
+                                        self.gadgets[*idx],
+                                        self.gadget(*idx).base.kind,
+                                        self.g_outputs(*idx).collect::<Vec<_>>()
+                                    );
+                                }
                                 let output = outputs[*pos as usize].unwrap();
                                 edges_valid[output] = Some(false);
                                 let sens_new = edges_sensitive[e_i.id().index()].unwrap();
@@ -466,11 +513,12 @@ impl<'a, 'b> BGadgetFlow<'a, 'b> {
             );
         }
         Ok(AGadgetFlow {
-            internals: self.internals.clone(),
             gadgets: new_gadgets,
+            internals: self.internals.clone(),
             n_cycles: self.n_cycles,
             o_node: self.o_node,
-            inv_node: self.inv_node,
+            inv_node_in: self.inv_node_in,
+            inv_node_out: self.inv_node_out,
             i_nodes: self.i_nodes.clone(),
         })
     }
