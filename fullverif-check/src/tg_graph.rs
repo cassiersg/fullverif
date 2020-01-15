@@ -346,49 +346,48 @@ impl<'a, 'b> BGadgetFlow<'a, 'b> {
         for idx in sorted_nodes.into_iter() {
             match &self.gadgets[*idx] {
                 GFNode::Gadget(_) => {
-                    if let Some(ctrl) = muxes_ctrls.get(idx) {
-                        let mut outputs: Vec<Option<usize>> = vec![
-                            None;
-                            self.g_outputs(*idx)
-                                .map(|e| e.weight().output)
-                                .collect::<HashSet<_>>()
-                                .len()
-                        ];
-                        for o_e in self.g_outputs(*idx) {
-                            let pos = o_e.weight().output.pos as usize;
-                            outputs[pos] = Some(o_e.id().index());
-                        }
+                    let max_output = self.g_outputs(*idx).map(|e| e.weight().output.pos).max();
+                    if let (Some(ctrl), Some(max_output)) = (muxes_ctrls.get(idx), max_output) {
+                        //let mut outputs: Vec<bool> = vec![false; max_output as usize + 1];
+                        let mut outputs_valid: Vec<Option<bool>> =
+                            vec![None; max_output as usize + 1];
+                        let mut outputs_sensitive: Vec<Option<Sensitive>> =
+                            vec![None; max_output as usize + 1];
                         if let Some(ctrl) = ctrl {
                             let input = if *ctrl { "in_true" } else { "in_false" };
                             for e_i in self.g_inputs(*idx) {
                                 let Sharing { port_name, pos } = &e_i.weight().input.0;
                                 if port_name == &input {
-                                    edges_valid[outputs[*pos as usize].unwrap()] =
-                                        edges_valid[e_i.id().index()];
+                                    outputs_valid[*pos as usize] = edges_valid[e_i.id().index()];
                                     // Neglect glitches for now, will come to it later
-                                    edges_sensitive[outputs[*pos as usize].unwrap()] =
+                                    outputs_sensitive[*pos as usize] =
                                         edges_sensitive[e_i.id().index()];
                                 }
                             }
                         } else {
                             for e_i in self.g_inputs(*idx) {
                                 let Sharing { pos, .. } = &e_i.weight().input.0;
-                                if *pos as usize >= outputs.len() {
+                                if *pos > max_output {
                                     panic!(
-                                        "pos: {}, outputs.len(): {}, name: {:?}, base: {:?}\noutputs:{:?}",
+                                        "pos: {}, max_output (): {}, name: {:?}, base: {:?}\noutputs:{:?}",
                                         *pos,
-                                        outputs.len(),
+                                        max_output,
                                         self.gadgets[*idx],
                                         self.gadget(*idx).base.kind,
                                         self.g_outputs(*idx).collect::<Vec<_>>()
                                     );
                                 }
-                                let output = outputs[*pos as usize].unwrap();
-                                edges_valid[output] = Some(false);
+                                outputs_valid[*pos as usize] = Some(false);
                                 let sens_new = edges_sensitive[e_i.id().index()].unwrap();
-                                let sens = edges_sensitive[output].get_or_insert(Sensitive::No);
+                                let sens =
+                                    outputs_sensitive[*pos as usize].get_or_insert(Sensitive::No);
                                 *sens = (*sens).max(sens_new);
                             }
+                        }
+                        for o_e in self.g_outputs(*idx) {
+                            let pos = o_e.weight().output.pos as usize;
+                            edges_valid[o_e.id().index()] = outputs_valid[pos];
+                            edges_sensitive[o_e.id().index()] = outputs_sensitive[pos];
                         }
                     } else {
                         let g_valid = self.g_inputs(*idx).all(|e| {
