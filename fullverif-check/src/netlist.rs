@@ -7,18 +7,46 @@ use itertools::Itertools;
 use std::convert::TryInto;
 use yosys_netlist_json as yosys;
 
-/// Return the attribute `attr` on the net `netname` in `module` as an in.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum RndLatencies {
+    Attr(Vec<Latency>),
+    Wire { wire_name: String, offset: i32 },
+}
+
+/// Return the attribute `attr` on the net `netname` in `module` as a string.
 /// If the attribute is not present, return None.
-/// If it has not the correct type (or overflows), return and Err.
+/// If it has not the correct type, return an Err.
+fn get_str_attr<'a>(
+    module: &'a yosys::Module,
+    netname: &str,
+    attr: &str,
+) -> Result<Option<&'a str>, CompError<'a>> {
+    if let Some(attr_v) = module.netnames[netname].attributes.get(attr) {
+        match attr_v {
+            yosys::AttributeVal::S(x) => Ok(Some(x)),
+            _ => Err(CompError::ref_sn(
+                module,
+                netname,
+                CompErrorKind::WrongAnnotation(attr.to_owned(), attr_v.clone()),
+            )),
+        }
+    } else {
+        Ok(None)
+    }
+}
+
+/// Return the attribute `attr` on the net `netname` in `module` as an integer.
+/// If the attribute is not present, return None.
+/// If it has not the correct type (or overflows), return an Err.
 fn get_int_attr<'a>(
     module: &'a yosys::Module,
     netname: &str,
     attr: &str,
-) -> Result<Option<u32>, CompError<'a>> {
+) -> Result<Option<i32>, CompError<'a>> {
     if let Some(attr_v) = module.netnames[netname].attributes.get(attr) {
         match attr_v {
-            yosys::AttributeVal::N(x) if TryInto::<Latency>::try_into(*x).is_ok() => {
-                Ok(Some(*x as u32))
+            yosys::AttributeVal::N(x) if TryInto::<u32>::try_into(*x).is_ok() => {
+                Ok(Some(TryInto::<u32>::try_into(*x).unwrap() as i32))
             }
             _ => Err(CompError::ref_sn(
                 module,
@@ -31,12 +59,36 @@ fn get_int_attr<'a>(
     }
 }
 
+fn get_int_attr_pos<'a>(
+    module: &'a yosys::Module,
+    netname: &str,
+    attr: &str,
+) -> Result<Option<u32>, CompError<'a>> {
+    get_int_attr(module, netname, attr).and_then(|v| {
+        v.map(|n| {
+            if n < 0 {
+                Err(CompError::ref_sn(
+                    module,
+                    netname,
+                    CompErrorKind::WrongAnnotation(
+                        attr.to_owned(),
+                        yosys::AttributeVal::N(n as usize),
+                    ),
+                ))
+            } else {
+                Ok(n as u32)
+            }
+        })
+        .transpose()
+    })
+}
+
 /// See get_int_attr but returns Err if the attribute is not present.
 fn get_int_attr_needed<'a>(
     module: &'a yosys::Module,
     netname: &str,
     attr: &str,
-) -> Result<u32, CompError<'a>> {
+) -> Result<i32, CompError<'a>> {
     get_int_attr(module, netname, attr)?
         .ok_or_else(|| CompError::missing_annotation(module, netname, attr))
 }
@@ -83,7 +135,7 @@ pub enum WireAttrs {
         latencies: gadgets::Latencies,
         count: u32,
     },
-    Random(Vec<Option<gadgets::Latencies>>),
+    Random(Vec<Option<RndLatencies>>),
     Control,
     Clock,
 }
@@ -127,25 +179,48 @@ fn get_latencies<'a>(
     netname: &str,
     attr_latency: &str,
     attr_latencies: &str,
-) -> Result<Vec<u32>, CompError<'a>> {
-    let latency = get_int_attr(module, netname, attr_latency)?;
+    attr_latencies_wire: &str,
+    attr_lat_sig_offset: &str,
+) -> Result<RndLatencies, CompError<'a>> {
+    let latency = get_int_attr_pos(module, netname, attr_latency)?;
     let latencies = get_bitstring_attr(module, netname, attr_latencies)?;
-    let latencies = if latency.is_some() && latencies.is_some() {
+    let latencies_wire = get_str_attr(module, netname, attr_latencies_wire)?;
+    let attrs_present = [
+        (latency.is_some(), attr_latency),
+        (latencies.is_some(), attr_latencies),
+        (latencies_wire.is_some(), attr_latencies_wire),
+    ];
+    let present_attrs = attrs_present
+        .into_iter()
+        .filter(|(o, _)| *o)
+        .map(|(_, a)| a)
+        .collect::<Vec<_>>();
+    if present_attrs.len() >= 2 {
         return Err(CompError::ref_sn(
             module,
             netname,
             CompErrorKind::ConflictingAnnotations(
-                attr_latency.to_owned(),
-                attr_latencies.to_owned(),
+                present_attrs[0].to_string(),
+                present_attrs[1].to_string(),
             ),
         ));
+    }
+    let latencies = if let Some(latencies_wire) = latencies_wire {
+        let offset = get_int_attr(module, netname, attr_lat_sig_offset)?
+            .ok_or_else(|| CompError::missing_annotation(module, netname, attr_lat_sig_offset))?;
+        RndLatencies::Wire {
+            wire_name: latencies_wire.to_string(),
+            offset,
+        }
     } else if let Some(l) = latencies {
-        l.into_iter()
-            .positions(|x| x)
-            .map(|x| x as Latency)
-            .collect()
+        RndLatencies::Attr(
+            l.into_iter()
+                .positions(|x| x)
+                .map(|x| x.try_into().expect("negative latency"))
+                .collect(),
+        )
     } else if let Some(l) = latency {
-        vec![l]
+        RndLatencies::Attr(vec![l.try_into().expect("negative latency")])
     } else {
         return Err(CompError::missing_annotation(module, netname, attr_latency));
     };
@@ -159,10 +234,25 @@ pub fn net_attributes<'a>(
 ) -> Result<WireAttrs, CompError<'a>> {
     let net = &module.netnames[netname];
     let fv_type = net.attributes.get("fv_type");
-    let fv_count = get_int_attr(module, netname, "fv_count")?;
+    let fv_count = get_int_attr_pos(module, netname, "fv_count")?;
     match fv_type {
         Some(yosys::AttributeVal::S(kind)) if kind == "sharing" => {
-            let latencies = get_latencies(module, netname, "fv_latency", "fv_latencies")?;
+            let latencies = if let RndLatencies::Attr(latencies) = get_latencies(
+                module,
+                netname,
+                "fv_latency",
+                "fv_latencies",
+                "__DO_NOT_USE_",
+                "__DO_NOT_USE",
+            )? {
+                latencies
+            } else {
+                return Err(CompError::ref_sn(
+                    module,
+                    netname,
+                    CompErrorKind::MissingAnnotation("fv_latency".to_owned()),
+                ));
+            };
             Ok(WireAttrs::Sharing {
                 latencies,
                 count: fv_count.unwrap_or(1),
@@ -183,6 +273,8 @@ pub fn net_attributes<'a>(
                         netname,
                         &format!("fv_rnd_lat_{}", i),
                         &format!("fv_rnd_lats_{}", i),
+                        &format!("fv_en_{}", i),
+                        &format!("fv_en_offset_{}", i),
                     )?;
                     for _ in 0..n_bits {
                         res.push(Some(latencies.clone()));

@@ -42,7 +42,7 @@ pub struct Gadget<'a> {
     /// Output sharings
     pub outputs: HashMap<Sharing<'a>, Latency>,
     /// Randomness inputs
-    pub randoms: HashMap<Random<'a>, Option<Latencies>>,
+    pub randoms: HashMap<Random<'a>, Option<netlist::RndLatencies>>,
     /// Security property
     pub prop: GadgetProp,
     /// Strategy to be used to prove the security
@@ -217,7 +217,13 @@ impl<'a> Gadget<'a> {
         let randoms_lats = self
             .randoms
             .values()
-            .filter_map(|x| x.as_ref())
+            .filter_map(|x| {
+                if let Some(netlist::RndLatencies::Attr(x)) = x {
+                    Some(x)
+                } else {
+                    None
+                }
+            })
             .flat_map(|x| x.iter());
         let max_in_lat = inputs_lats.chain(randoms_lats).copied().min();
         if let Some(max_in_lat) = max_in_lat {

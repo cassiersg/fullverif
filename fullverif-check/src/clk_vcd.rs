@@ -15,6 +15,16 @@ pub enum VarState {
     Uninit,
 }
 
+impl VarState {
+    pub fn to_bool(&self) -> Option<bool> {
+        match self {
+            VarState::Scalar(vcd::Value::V0) => Some(false),
+            VarState::Scalar(vcd::Value::V1) => Some(true),
+            _ => None,
+        }
+    }
+}
+
 /// Id of a variable (for lookup into State)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct VarId(vcd::IdCode);

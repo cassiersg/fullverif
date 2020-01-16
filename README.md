@@ -154,6 +154,11 @@ attribute of input sharings (see below).
 For the top-level module, all chunks and latency information may not be
 provided by setting `fv_count=0`, in which case random latencies are
 inferred.
+For the top-level module, instead of `fv_rnd_lat(s)_{i}`, the latencies may be specified by means of a signal in the module.
+The randomness is considered valid for all cycles `c` that satisfy the
+following condition: the signal denoted in the attribute `fv_en_{i}` is
+asserted at the cycle `c+o`, where `o` is the value of the `fv_en_offset_{i}`
+attribute.
 
 *Latency specification.* The latency is given for input and output sharings and
 randomness in number of clock cycles.

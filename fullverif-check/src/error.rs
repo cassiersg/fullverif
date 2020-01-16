@@ -181,6 +181,9 @@ impl<'a> CompError<'a> {
             CompErrorKind::MissingAnnotation(attr.to_owned()),
         )
     }
+    pub fn other(module: &'a yosys::Module, netname: &str, err: &str) -> Self {
+        Self::ref_sn(module, netname, CompErrorKind::Other(err.to_owned()))
+    }
 }
 
 impl<'a> fmt::Display for CompError<'a> {

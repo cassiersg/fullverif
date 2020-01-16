@@ -4,7 +4,7 @@ use crate::clk_vcd;
 use crate::error::{CResult, CompError, CompErrorKind, CompErrors};
 use crate::gadget_internals::{self, Connection, GName, RndConnection};
 use crate::gadgets::{self, Input, Latency, Sharing};
-use crate::netlist;
+use crate::netlist::{self, RndLatencies};
 use petgraph::{
     graph::{self, NodeIndex},
     visit::{EdgeRef, IntoNodeIdentifiers, IntoNodeReferences},
@@ -775,21 +775,52 @@ impl<'a, 'b> AGadgetFlow<'a, 'b> {
         let errors = self
             .randoms_input_timing(controls)?
             .keys()
-            .filter(|(rnd, lat)| {
-                !self.internals.gadget.randoms[rnd]
-                    .as_ref()
-                    .unwrap()
-                    .contains(lat)
-            })
-            .map(|(rnd, lat)| {
-                CompError::ref_nw(
+            .map(|(rnd, lat)|
+                match &self.internals.gadget.randoms[rnd] {
+                    Some(RndLatencies::Attr(lats)) => if lats.contains(lat) {
+                        Ok(()) } else {
+                        Err(CompError::other(
+                                &self.internals.gadget.module,
+                                rnd.port_name,
+                                &format!("Random input {} is used at cycle {} while not valid at that cycle.", rnd, lat)
+                        ))
+                    }
+                    Some(RndLatencies::Wire { wire_name, offset }) => {
+                        let cycle = <u32 as std::convert::TryFrom<i32>>::try_from(
+                            (*lat as i32) + offset).map_err(|_| CompError::other(
+                                &self.internals.gadget.module,
+                                rnd.port_name,
+                                &format!("For random at cycle {}, control signal cycle is negative (offset: {})", lat, offset)
+                            )
+                            )?;
+                        let valid = controls.lookup(
+                            vec![wire_name.clone()],
+                            cycle as usize, 0
+                            )?.and_then(|var_state|
+                            var_state.to_bool()).ok_or_else(|| CompError::other(
+                                &self.internals.gadget.module,
+                                rnd.port_name,
+                                &format!("Valid-indicating wire has no value at cycle {} (for rnd at cycle {})", cycle, lat)
+                                )
+                            )?;
+                        if valid {
+                            Ok(())
+                        } else {
+                                Err(CompError::other(
+                                        &self.internals.gadget.module,
+                                        rnd.port_name,
+                                        &format!("Random input {} is used at cycle {} while not valid at that cycle.", rnd, lat)
+                                ))
+                        }
+                    }
+                    None =>
+                Err(CompError::ref_sn(
                     &self.internals.gadget.module,
-                    CompErrorKind::Other(format!(
-                        "Random input {} is used at cycle {} while not valid at that cycle.",
-                        rnd, lat
-                    )),
-                )
-            })
+                    rnd.port_name,
+                    CompErrorKind::Other("Sub-gadget randomness inputs must be annotated with the 'fv_latency' attribute".to_string()),
+                ))
+                })
+        .filter_map(Result::err)
             .collect::<Vec<_>>();
         CompErrors::result(errors)
     }
@@ -914,7 +945,7 @@ fn random_connections<'a, 'b>(
     let mut res = HashMap::new();
     for (r_name, random_lats) in sgi.kind.randoms.iter() {
         match random_lats {
-            Some(random_lats) => {
+            Some(netlist::RndLatencies::Attr(random_lats)) => {
                 for lat in random_lats.iter() {
                     res.insert(
                         (*r_name, *lat),
@@ -922,7 +953,7 @@ fn random_connections<'a, 'b>(
                     );
                 }
             }
-            None => {
+            Some(netlist::RndLatencies::Wire { .. }) | None => {
                 Err(CompError::ref_sn(
                     sgi.kind.module,
                     &r_name.port_name,
