@@ -2,40 +2,40 @@ module MSKref_cst #(parameter d=2) (in, clk, out, rnd);
 
 `include "MSKref_cst.inc"
 
-(* fv_type="sharing", fv_latency=2 *) input [d-1:0] in;
-(* fv_type="sharing", fv_latency=3 *) output reg [d-1:0] out;
+(* syn_keep="true", keep="true", fv_type="sharing", fv_latency=2 *) input [d-1:0] in;
+(* syn_keep="true", keep="true", fv_type="sharing", fv_latency=3 *) output reg [d-1:0] out;
 (* fv_type="clock" *) input clk;
-(* fv_type= "random", fv_count=1, fv_rnd_lat_0 = 0, fv_rnd_count_0 = ref_n_rnd *)
+(* syn_keep="true", keep="true", fv_type= "random", fv_count=1, fv_rnd_lat_0 = 0, fv_rnd_count_0 = ref_n_rnd *)
 input [ref_n_rnd-1:0] rnd;
 
-reg [d-1:0] share0;
+(* syn_preserve = "true", preserve = "true" *) reg [d-1:0] share0;
 always @(posedge clk)
     out <= in ^ share0;
 
 if (d == 2) begin
-    reg [d-1:0] share0b;
+    (* syn_preserve = "true", preserve = "true" *) reg [d-1:0] share0b;
     always @(posedge clk) begin
         share0b <= {rnd[0], rnd[0]};
         share0 <= share0b;
     end
 end else if (d==3) begin
-    reg [d-1:0] share0b;
+    (* syn_preserve = "true", preserve = "true" *) reg [d-1:0] share0b;
     always @(posedge clk) begin
         share0b <= {rnd[0]^rnd[1], rnd[1], rnd[0]};
         share0 <= share0b;
     end
 end else if (d==4 || d==5) begin
     wire [d-1:0] r1 = rnd[d-1:0];
-    reg [d-1:0] share0b;
+    (* syn_preserve = "true", preserve = "true" *) reg [d-1:0] share0b;
     always @(posedge clk) begin
         share0b <= r1[d-1:0] ^ { r1[d-2:0], r1[d-1] };
         share0 <= share0b;
     end
 end else if (d <= 12) begin
     wire [d-1:0] r1 = rnd[d-1:0];
-    reg [ref_n_rnd-d-1:0] r2;
+    (* syn_preserve = "true", preserve = "true" *) reg [ref_n_rnd-d-1:0] r2;
     always @(posedge clk) r2 <= rnd[ref_n_rnd:d];
-    reg [d-1:0] s1;
+    (* syn_preserve = "true", preserve = "true" *) reg [d-1:0] s1;
     always @(posedge clk)
         s1 <= r1[d-1:0] ^ { r1[d-2:0], r1[d-1] };
     case (d)
@@ -107,7 +107,7 @@ end else if (d <= 12) begin
 end else if (d <= 16) begin
     wire [d-1:0] r1 = rnd[d-1:0];
     wire [ref_n_rnd-d-1:0] r2 = rnd[ref_n_rnd:d];
-    reg [d-1:0] s1, s2;
+    (* syn_preserve = "true", preserve = "true" *) reg [d-1:0] s1, s2;
     always @(posedge clk) begin
         s1 <= r1[d-1:0] ^ { r1[d-2:0], r1[d-1] };
         s2 <= r1[d-1:0] ^ { r2[d-4:0], r2[d-1:d-3] };
@@ -115,6 +115,4 @@ end else if (d <= 16) begin
     end
 end
 
-
 endmodule
-

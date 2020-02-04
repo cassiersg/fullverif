@@ -1,8 +1,8 @@
 (* fv_prop = "affine", fv_strat = "isolate", fv_order = d *)
 module MSKinv #(parameter d=2, parameter count=1) (in, out);
 
-(* fv_type = "sharing", fv_latency = 0, fv_count=count *) input  [count*d-1:0] in;
-(* fv_type = "sharing", fv_latency = 0, fv_count=count *) output [count*d-1:0] out;
+(* syn_keep="true", keep="true", fv_type = "sharing", fv_latency = 0, fv_count=count *) input  [count*d-1:0] in;
+(* syn_keep="true", keep="true", fv_type = "sharing", fv_latency = 0, fv_count=count *) output [count*d-1:0] out;
 
 genvar i;
 generate

@@ -33,5 +33,7 @@ yosys setattr -mod -unset keep_hierarchy A:fv_strat=flatten;
 yosys flatten;
 
 # Output the result in verilog (for simulation) and json (for analysis).
-yosys write_verilog -norename $OUT_DIR/${MAIN_MODULE}_synth.v;
 yosys write_json $OUT_DIR/${MAIN_MODULE}_synth.json
+
+yosys setattr -unset fv_*;
+yosys write_verilog -norename $OUT_DIR/${MAIN_MODULE}_synth.v;

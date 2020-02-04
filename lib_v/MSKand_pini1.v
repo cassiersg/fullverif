@@ -3,11 +3,11 @@ module MSKand_pini1 #(parameter d=2) (ina, inb, rnd, clk, out);
 
 localparam n_rnd=d*(d-1)/2;
 
-(* fv_type = "sharing", fv_latency = 1 *) input  [d-1:0] ina;
-(* fv_type = "sharing", fv_latency = 0 *) input  [d-1:0] inb;
-(* fv_type = "random", fv_count = 1, fv_rnd_lat_0 = 0, fv_rnd_count_0 = n_rnd *) input [n_rnd-1:0] rnd;
+(* syn_keep = "true", keep = "true", fv_type = "sharing", fv_latency = 1 *) input  [d-1:0] ina;
+(* syn_keep = "true", keep = "true", fv_type = "sharing", fv_latency = 0 *) input  [d-1:0] inb;
+(* syn_keep = "true", keep = "true", fv_type = "random", fv_count = 1, fv_rnd_lat_0 = 0, fv_rnd_count_0 = n_rnd *) input [n_rnd-1:0] rnd;
 (* fv_type = "clock" *) input clk;
-(* fv_type = "sharing", fv_latency = 2 *) output [d-1:0] out;
+(* syn_keep = "true", keep = "true", fv_type = "sharing", fv_latency = 2 *) output [d-1:0] out;
 
 genvar i,j;
 
@@ -28,27 +28,27 @@ for(i=0; i<d; i=i+1) begin: igen
     end
 end
 
-(* keep = "true" *) wire [d-1:0] not_ina = ~ina;
-(* keep = "true" *) reg [d-1:0] inb_prev;
+(* syn_keep = "true", keep = "true" *) wire [d-1:0] not_ina = ~ina;
+(* syn_preserve = "true", preserve = "true" *) reg [d-1:0] inb_prev;
 always @(posedge clk) inb_prev <= inb;
 
 for(i=0; i<d; i=i+1) begin: ParProdI
-    (* keep = "true" *) reg [d-2:0] u, v, w;
-    (* keep = "true" *) reg aibi;
-    (* keep = "true" *) wire aibi_comb = ina[i] & inb_prev[i];
-    always @(posedge clk) aibi <= aibi_comb;
-    assign out[i] = aibi ^ ^u ^ ^w;
+    (* syn_preserve = "true", preserve = "true" *) reg [d-2:0] u, v, w;
+    (* syn_preserve = "true", preserve = "true" *) reg aibi;
+    (* syn_keep = "true", keep = "true" *) wire aibi_comb = ina[i] & inb_prev[i];
+    always @(posedge clk) (* keep = "true" *) aibi <= aibi_comb;
+    (* syn_keep = "true", keep = "true" *) assign out[i] = aibi ^ ^u ^ ^w;
     for(j=0; j<d; j=j+1) begin: ParProdJ
         if (i != j) begin: NotEq
             localparam j2 = j < i ?  j : j-1;
-            (* keep = "true" *) wire u_j2_comb = not_ina[i] & rnd_mat_prev[i][j];
-            (* keep = "true" *) wire v_j2_comb = inb[j] ^ rnd_mat[i][j];
-            (* keep = "true" *) wire w_j2_comb = ina[i] & v[j2];
+            (* syn_keep = "true", keep = "true" *) wire u_j2_comb = not_ina[i] & rnd_mat_prev[i][j];
+            (* syn_keep = "true", keep = "true" *) wire v_j2_comb = inb[j] ^ rnd_mat[i][j];
+            (* syn_keep = "true", keep = "true" *) wire w_j2_comb = ina[i] & v[j2];
             always @(posedge clk)
             begin
-                u[j2] <= u_j2_comb;
-                v[j2] <= v_j2_comb;
-                w[j2] <= w_j2_comb;
+                (* syn_preserve = "true", preserve = "true" *) u[j2] <= u_j2_comb;
+                (* syn_preserve = "true", preserve = "true" *) v[j2] <= v_j2_comb;
+                (* syn_preserve = "true", preserve = "true" *) w[j2] <= w_j2_comb;
             end
         end
     end
