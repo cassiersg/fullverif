@@ -34,7 +34,7 @@ end else if (d==4 || d==5) begin
 end else if (d <= 12) begin
     wire [d-1:0] r1 = rnd[d-1:0];
     (* syn_preserve = "true", preserve = "true" *) reg [ref_n_rnd-d-1:0] r2;
-    always @(posedge clk) r2 <= rnd[ref_n_rnd:d];
+    always @(posedge clk) r2 <= rnd[ref_n_rnd-1:d];
     (* syn_preserve = "true", preserve = "true" *) reg [d-1:0] s1;
     always @(posedge clk)
         s1 <= r1[d-1:0] ^ { r1[d-2:0], r1[d-1] };
@@ -106,7 +106,7 @@ end else if (d <= 12) begin
     endcase
 end else if (d <= 16) begin
     wire [d-1:0] r1 = rnd[d-1:0];
-    wire [ref_n_rnd-d-1:0] r2 = rnd[ref_n_rnd:d];
+    wire [ref_n_rnd-d-1:0] r2 = rnd[ref_n_rnd-1:d];
     (* syn_preserve = "true", preserve = "true" *) reg [d-1:0] s1, s2;
     always @(posedge clk) begin
         s1 <= r1[d-1:0] ^ { r1[d-2:0], r1[d-1] };
