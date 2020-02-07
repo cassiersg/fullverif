@@ -36,8 +36,8 @@ for(i=0; i<d; i=i+1) begin: ParProdI
     (* syn_preserve = "true", preserve = "true" *) reg [d-2:0] u, v, w;
     (* syn_preserve = "true", preserve = "true" *) reg aibi;
     (* syn_keep = "true", keep = "true" *) wire aibi_comb = ina[i] & inb_prev[i];
-    always @(posedge clk) (* keep = "true" *) aibi <= aibi_comb;
-    (* syn_keep = "true", keep = "true" *) assign out[i] = aibi ^ ^u ^ ^w;
+    always @(posedge clk) aibi <= aibi_comb;
+    assign out[i] = aibi ^ ^u ^ ^w;
     for(j=0; j<d; j=j+1) begin: ParProdJ
         if (i != j) begin: NotEq
             localparam j2 = j < i ?  j : j-1;
@@ -46,9 +46,9 @@ for(i=0; i<d; i=i+1) begin: ParProdI
             (* syn_keep = "true", keep = "true" *) wire w_j2_comb = ina[i] & v[j2];
             always @(posedge clk)
             begin
-                (* syn_preserve = "true", preserve = "true" *) u[j2] <= u_j2_comb;
-                (* syn_preserve = "true", preserve = "true" *) v[j2] <= v_j2_comb;
-                (* syn_preserve = "true", preserve = "true" *) w[j2] <= w_j2_comb;
+                u[j2] <= u_j2_comb;
+                v[j2] <= v_j2_comb;
+                w[j2] <= w_j2_comb;
             end
         end
     end
