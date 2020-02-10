@@ -74,6 +74,19 @@ end else if (d <= 12) begin
             s1[1]^r2[1],
             s1[0]^r2[2]
         };
+        10: always @(posedge clk)
+        share0 <= {
+            s1[9]^r2[4],
+            s1[8]^r2[3],
+            s1[7]^r2[2],
+            s1[6]^r2[1],
+            s1[5]^r2[0],
+            s1[4]^r2[4],
+            s1[3]^r2[3],
+            s1[2]^r2[2],
+            s1[1]^r2[1],
+            s1[0]^r2[0]
+        };
         11: always @(posedge clk)
         share0 <= {
             s1[10]^r2[0],
