@@ -10,3 +10,6 @@ The fullverif-check component found in fullverif-check/ is licensed under the
 terms of the GNU General Public License as published by the Free Software
 Foundation, version 3 <LICENSE-GL3> or <https://www.gnu.org/licenses/gpl-3.0.txt>.
 
+The lib_v component found in lib_v/ is licensed under the
+terms of the Solderpad Hardware Licence Version 2.0 <LICENSE-SHL> or
+<https://solderpad.org/licenses/SHL-2.0/>.
