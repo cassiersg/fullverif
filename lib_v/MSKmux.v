@@ -1,3 +1,4 @@
+// Masked 2-input MUX (non-sensitive control signal).
 (* fv_prop = "_mux", fv_strat = "assumed", fv_order = d *)
 module MSKmux #(parameter d=1, parameter count=1) (sel, in_true, in_false, out);
 

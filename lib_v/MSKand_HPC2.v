@@ -1,18 +1,18 @@
 (* fv_prop = "PINI", fv_strat = "assumed", fv_order=d *)
-module MSKand_pini1 #(parameter d=2) (ina, inb, rnd, clk, out);
+module MSKand_HPC2 #(parameter d=2) (ina, inb, rnd, clk, out);
 
-localparam n_rnd=d*(d-1)/2;
+`include "MSKand_HPC2.vh"
 
 (* syn_keep = "true", keep = "true", fv_type = "sharing", fv_latency = 1 *) input  [d-1:0] ina;
 (* syn_keep = "true", keep = "true", fv_type = "sharing", fv_latency = 0 *) input  [d-1:0] inb;
-(* syn_keep = "true", keep = "true", fv_type = "random", fv_count = 1, fv_rnd_lat_0 = 0, fv_rnd_count_0 = n_rnd *) input [n_rnd-1:0] rnd;
+(* syn_keep = "true", keep = "true", fv_type = "random", fv_count = 1, fv_rnd_lat_0 = 0, fv_rnd_count_0 = and_pini_nrnd *) input [and_pini_nrnd-1:0] rnd;
 (* fv_type = "clock" *) input clk;
 (* syn_keep = "true", keep = "true", fv_type = "sharing", fv_latency = 2 *) output [d-1:0] out;
 
 genvar i,j;
 
 // unpack vector to matrix --> easier for randomness handling
-reg [n_rnd-1:0] rnd_prev;
+reg [and_pini_nrnd-1:0] rnd_prev;
 always @(posedge clk) rnd_prev <= rnd;
 
 wire [d-1:0] rnd_mat [d-1:0]; 

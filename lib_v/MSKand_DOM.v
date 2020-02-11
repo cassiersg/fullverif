@@ -1,4 +1,5 @@
-module MSKand #(parameter d=2) (ina, inb, rnd, clk, out);
+(* fv_prop = "NI", fv_strat = "assumed", fv_order=d *)
+module MSKand_DOM #(parameter d=2) (ina, inb, rnd, clk, out);
 
 localparam n_rnd=d*(d-1)/2;
 

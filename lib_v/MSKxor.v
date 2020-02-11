@@ -1,3 +1,4 @@
+// Masked XOR gate
 (* fv_prop = "affine", fv_strat = "isolate", fv_order = d *)
 module MSKxor #(parameter d=1, parameter count=1) (ina, inb, out);
 

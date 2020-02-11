@@ -1,6 +1,8 @@
-module MSKref_cst #(parameter d=2) (in, clk, out, rnd);
+// SNI refresh gadget, for d=2,...,16
+(* fv_prop = "SNI", fv_strat = "assumed", fv_order=d *)
+module MSKref #(parameter d=2) (in, clk, out, rnd);
 
-`include "MSKref_cst.inc"
+`include "MSKref.vh"
 
 (* syn_keep="true", keep="true", fv_type="sharing", fv_latency=2 *) input [d-1:0] in;
 (* syn_keep="true", keep="true", fv_type="sharing", fv_latency=3 *) output reg [d-1:0] out;

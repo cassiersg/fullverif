@@ -1,3 +1,4 @@
+// Masked register with enable signal.
 (* fv_strat = "flatten" *)
 module MSKregEn #(parameter d=1, parameter count=1) (clk, en, in, out);
 

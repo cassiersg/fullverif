@@ -7,7 +7,7 @@ checks that the larger composite circuit is secure by using a compositional
 strategy (e.g.  based on PINI, SNI, NI).
 
 For more background on compositional strategies for masked hardware
-implementations, see [the paper](https://eprint.iacr.org/2019/000) on which
+implementations, see [the paper](https://eprint.iacr.org/2020/TODO) on which
 this tool is based.
 
 ## Principle
@@ -43,7 +43,7 @@ Assuming Yosys and Iverilog are installed in `/usr/local` (otherwise, edit the
 script `fullverif.sh` accordingly).
 
 - `git clone https://github.com/cassiersg/present_hpc.git`
-- `./fullverif/main.sh present_hpc MSKpresent tb_msk_present`
+- `./fullverif/main.sh present_hpc MSKpresent_encrypt tb_present_128`
 
 ### Custom run
 
@@ -262,12 +262,35 @@ Linear and affine gates:
 - NOT (`MSKinv.v`)
 
 Non-linear gate:
-- AND (`MSKand_hpc.v`)
+- PINI AND (`MSKand_HPC1.v`)
+- PINI AND (`MSKand_HPC1.v`)
+- DOM (NI) AND (`MSKand_DOM.v`)
 
 Other:
-- Masking a non-sensitive value (`cst_mask.v`). Note: The encoding does not
+- Masking a non-sensitive value (`MSKcst.v`). Note: The encoding does not
   need randomness since the value itself originally not masked and therefore
   not sensitive.
+- SNI refresh (`MSKref.v`)
+
+### Preventing damaging synthesis optimizations
+
+The fullverif tool cannot guarantee that its output netlist will be protected
+against optimizations that could break the security if it is fed to other tools
+such as synthesizers.
+
+This is mainly due to a lack of standard way of describing this requirement in
+the HDL code.
+However, the usage of the provided gadget library may help, by reducing the
+concerns to the modules contained inside that library: all the other modules
+that manipulate sharings do so only with wiring, which optimizers should not
+have adversarial behavior.
+We advise to disable as much as possible optimizations that remove, simplify or
+re-time logic for gagdets of the library.
+In order to ease this, we added `(* syn_keep="true", keep="true" *)` attributes
+on sensitive `wire`s and `(* syn_preserve="true", preserve="true" *)` on
+sensitive `reg`s.
+
+Any suggestion on how to handle this in a better way is welcome.
 
 ## Bugs, contributing, etc.
 

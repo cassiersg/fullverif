@@ -1,3 +1,4 @@
+// Masked register.
 (* fv_prop = "affine", fv_strat="isolate", fv_order=d *)
 module MSKreg #(parameter d=1, parameter count=1) (clk, in, out);
 

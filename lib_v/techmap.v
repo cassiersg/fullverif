@@ -21,7 +21,10 @@
  *
  * ---
  *
- * fullverif modification: we keep only the shift(x) mapping to muxes out of this library.
+ * fullverif modifications (c) UCLouvain 2019:
+ * - we keep only the shift(x) mapping to muxes out of this library.
+ * 
+ * For fullverif internal usage.
  *
  */
 

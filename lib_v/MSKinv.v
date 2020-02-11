@@ -1,3 +1,4 @@
+// Masked NOT gate
 (* fv_prop = "affine", fv_strat = "isolate", fv_order = d *)
 module MSKinv #(parameter d=2, parameter count=1) (in, out);
 
