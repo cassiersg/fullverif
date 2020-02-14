@@ -60,6 +60,12 @@ In the following, we describe the steps.
 **Synthesis** takes the design as input and must be performed by Yosys, using
 the provided `msk_presynth.tcl` script. 
 This outputs a netlist in two formats: a verilog and a json one.
+By default (configurable in `main.sh`), the outputs are written in a temporary
+directory, whose name is displayed (on stdout).
+In order to support various usages an tools (while not producing thousands of
+warnings), the verilog netlist is written down in 3 variant: one that contains
+attributes, ones that does not contain any attributes, and finally one where
+attributes are converted to comments.
 
 **Simulation** takes the verilog netlist, a testbench and optionnally other
 verilog files and outputs a vcd.
@@ -75,7 +81,7 @@ If you intend to use this tool on other code than the provided examples, you
 should read, in addition to this README, all the settings in the `main.sh`
 script, since those must match the verilog code.
 You might also find the output of the fullverif binary
-(`fullverif/target/release/fullverif --help`) and the `lib_v/msk_presynth.tcl`
+(`fullverif/target/release/fullverif --help`) and the `msk_presynth.tcl`
 helpful.
 
 ## Design
