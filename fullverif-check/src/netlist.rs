@@ -191,7 +191,7 @@ fn get_latencies<'a>(
         (latencies_wire.is_some(), attr_latencies_wire),
     ];
     let present_attrs = attrs_present
-        .into_iter()
+        .iter()
         .filter(|(o, _)| *o)
         .map(|(_, a)| a)
         .collect::<Vec<_>>();

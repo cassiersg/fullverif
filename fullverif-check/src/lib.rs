@@ -22,6 +22,7 @@ mod gadget_internals;
 mod gadgets;
 mod inner_affine;
 mod netlist;
+mod raw_internals;
 mod tg_graph;
 mod utils;
 

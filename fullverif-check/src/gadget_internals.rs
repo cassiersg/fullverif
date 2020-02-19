@@ -447,7 +447,9 @@ fn get_connection_bits<'a>(
     &connections[sharing.port_name][base..base + (gadget.order as usize)]
 }
 
-fn list_wire_uses<'a>(
+/// For each wire in a module, return the list of cells to which it is connected, the port and the
+/// offset in the port.
+pub fn list_wire_uses<'a>(
     module: &'a yosys::Module,
 ) -> HashMap<yosys::BitVal, Vec<(&'a str, &'a str, u32)>> {
     let mut res = HashMap::new();

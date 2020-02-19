@@ -534,6 +534,52 @@ impl<'a, 'b> BGadgetFlow<'a, 'b> {
     }
 }
 
+pub fn is_rnd_valid<'a>(
+    gadget: &gadgets::Gadget<'a>,
+    rnd: &gadgets::Random<'a>,
+    lat: Latency,
+    controls: &mut clk_vcd::ModuleControls,
+) -> Result<bool, CompError<'a>> {
+    match &gadget.randoms[rnd] {
+        Some(RndLatencies::Attr(lats)) => Ok(lats.contains(&lat)),
+        Some(RndLatencies::Wire { wire_name, offset }) => {
+            let cycle = <u32 as std::convert::TryFrom<i32>>::try_from((lat as i32) + offset)
+                .map_err(|_| {
+                    CompError::other(
+                        &gadget.module,
+                        rnd.port_name,
+                        &format!(
+                            "For random at cycle {}, control signal cycle is negative (offset: {})",
+                            lat, offset
+                        ),
+                    )
+                })?;
+            let valid = controls
+                .lookup(vec![wire_name.clone()], cycle as usize, 0)?
+                .and_then(|var_state| var_state.to_bool())
+                .ok_or_else(|| {
+                    CompError::other(
+                        &gadget.module,
+                        rnd.port_name,
+                        &format!(
+                            "Valid-indicating wire has no value at cycle {} (for rnd at cycle {})",
+                            cycle, lat
+                        ),
+                    )
+                })?;
+            Ok(valid)
+        }
+        None => Err(CompError::ref_sn(
+            &gadget.module,
+            rnd.port_name,
+            CompErrorKind::Other(
+                "Sub-gadget randomness inputs must be annotated with the 'fv_latency' attribute"
+                    .to_string(),
+            ),
+        )),
+    }
+}
+
 impl<'a, 'b> AGadgetFlow<'a, 'b> {
     /// Is the gadget n valid, that is, are all the inputs of node n valid ?
     fn gadget_valid(&self, n: NodeIndex) -> bool {
@@ -775,52 +821,21 @@ impl<'a, 'b> AGadgetFlow<'a, 'b> {
         let errors = self
             .randoms_input_timing(controls)?
             .keys()
-            .map(|(rnd, lat)|
-                match &self.internals.gadget.randoms[rnd] {
-                    Some(RndLatencies::Attr(lats)) => if lats.contains(lat) {
-                        Ok(()) } else {
-                        Err(CompError::other(
-                                &self.internals.gadget.module,
-                                rnd.port_name,
-                                &format!("Random input {} is used at cycle {} while not valid at that cycle.", rnd, lat)
-                        ))
-                    }
-                    Some(RndLatencies::Wire { wire_name, offset }) => {
-                        let cycle = <u32 as std::convert::TryFrom<i32>>::try_from(
-                            (*lat as i32) + offset).map_err(|_| CompError::other(
-                                &self.internals.gadget.module,
-                                rnd.port_name,
-                                &format!("For random at cycle {}, control signal cycle is negative (offset: {})", lat, offset)
-                            )
-                            )?;
-                        let valid = controls.lookup(
-                            vec![wire_name.clone()],
-                            cycle as usize, 0
-                            )?.and_then(|var_state|
-                            var_state.to_bool()).ok_or_else(|| CompError::other(
-                                &self.internals.gadget.module,
-                                rnd.port_name,
-                                &format!("Valid-indicating wire has no value at cycle {} (for rnd at cycle {})", cycle, lat)
-                                )
-                            )?;
-                        if valid {
-                            Ok(())
-                        } else {
-                                Err(CompError::other(
-                                        &self.internals.gadget.module,
-                                        rnd.port_name,
-                                        &format!("Random input {} is used at cycle {} while not valid at that cycle.", rnd, lat)
-                                ))
-                        }
-                    }
-                    None =>
-                Err(CompError::ref_sn(
-                    &self.internals.gadget.module,
-                    rnd.port_name,
-                    CompErrorKind::Other("Sub-gadget randomness inputs must be annotated with the 'fv_latency' attribute".to_string()),
-                ))
-                })
-        .filter_map(Result::err)
+            .map(|(rnd, lat)| {
+                if is_rnd_valid(&self.internals.gadget, rnd, *lat, controls)? {
+                    Ok(())
+                } else {
+                    Err(CompError::other(
+                        &self.internals.gadget.module,
+                        rnd.port_name,
+                        &format!(
+                            "Random input {} is used at cycle {} while not valid at that cycle.",
+                            rnd, lat
+                        ),
+                    ))
+                }
+            })
+            .filter_map(Result::err)
             .collect::<Vec<_>>();
         CompErrors::result(errors)
     }
