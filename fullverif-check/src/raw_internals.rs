@@ -69,14 +69,14 @@ impl<'a> GateId<'a> {
 }
 
 #[derive(Debug, Clone, Copy)]
-enum GNode<'a, Cst = yosys::BitVal> {
+pub enum GNode<'a, Cst = yosys::BitVal> {
     Gate(RawGate<Cst>, GateId<'a>),
     Input(GadgetInput<'a>),
     Constant(Cst),
 }
 
 #[derive(Debug, Clone, Copy)]
-struct Edge<'a> {
+pub struct Edge<'a> {
     input_name: &'a str,
 }
 const A_EDGE: Edge<'static> = Edge { input_name: "A" };
@@ -85,41 +85,31 @@ const D_EDGE: Edge<'static> = Edge { input_name: "D" };
 const Q_EDGE: Edge<'static> = Edge { input_name: "Q" };
 
 #[derive(Debug, Clone)]
-struct GadgetGates<'a> {
-    gates: Graph<GNode<'a>, Edge<'a>>,
-    wires: HashMap<yosys::BitVal, petgraph::graph::NodeIndex>,
-    gate_names: HashMap<GateId<'a>, petgraph::graph::NodeIndex>,
-    gadget: &'a Gadget<'a>,
+pub struct GadgetGates<'a, 'b> {
+    pub gates: Graph<GNode<'a>, Edge<'a>>,
+    pub wires: HashMap<yosys::BitVal, petgraph::graph::NodeIndex>,
+    pub gate_names: HashMap<GateId<'a>, petgraph::graph::NodeIndex>,
+    pub gadget: &'b Gadget<'a>,
 }
 
 #[derive(Debug, Clone)]
-struct UnrolledGates<'a> {
-    tgates: Graph<(GNode<'a, bool>, Latency), Edge<'a>>,
-    gates2timed: HashMap<(NodeIndex, Latency), NodeIndex>,
-    sorted_gates: Vec<NodeIndex>,
-    gadget: &'a GadgetGates<'a>,
-    n_cycles: Latency,
-    outputs: HashMap<NodeIndex, Share<'a>>,
+pub struct UnrolledGates<'a, 'b> {
+    pub tgates: Graph<(GNode<'a, bool>, Latency), Edge<'a>>,
+    pub gates2timed: HashMap<(NodeIndex, Latency), NodeIndex>,
+    pub sorted_gates: Vec<NodeIndex>,
+    pub gadget: &'b GadgetGates<'a, 'b>,
+    pub n_cycles: Latency,
+    pub outputs: HashMap<NodeIndex, Share<'a>>,
 }
 
 // Hacky rust "impl Trait" limitation workaround
 trait LT<'a> {}
 impl<'a, T> LT<'a> for T {}
 
-impl<'a> UnrolledGates<'a> {
-    fn iter_nodes<'b>(&'b self) -> impl Iterator<Item = NodeIndex> + LT<'b> + LT<'a>
+impl<'a: 'b, 'b> UnrolledGates<'a, 'b> {
+    fn inputs<'c>(&'c self, node: NodeIndex) -> impl Iterator<Item = NodeIndex> + LT<'c> + LT<'a>
     where
-        'a: 'b,
-    {
-        (0..self.n_cycles).flat_map(move |cycle| {
-            self.sorted_gates
-                .iter()
-                .map(move |node| self.gates2timed[&(*node, cycle)])
-        })
-    }
-    fn inputs<'b>(&'b self, node: NodeIndex) -> impl Iterator<Item = NodeIndex> + LT<'b> + LT<'a>
-    where
-        'a: 'b,
+        'a: 'c,
     {
         self.tgates.neighbors_directed(node, Direction::Incoming)
     }
@@ -130,20 +120,20 @@ impl<'a> UnrolledGates<'a> {
             .unwrap()
             .source()
     }
-    fn annotate_valid(&self) -> Vec<bool> {
+    pub fn annotate_valid(&self) -> Vec<bool> {
         let mut valid = vec![false; self.tgates.node_count()];
-        for node in self.iter_nodes() {
-            valid[node.index()] = match self.tgates[node].0 {
+        for node in self.sorted_gates.iter() {
+            valid[node.index()] = match self.tgates[*node].0 {
                 GNode::Gate(RawGate::Reg, _)
                 | GNode::Gate(RawGate::Inv, _)
                 | GNode::Gate(RawGate::BoolBin(_), _) => self
                     .tgates
-                    .neighbors_directed(node, Direction::Incoming)
+                    .neighbors_directed(*node, Direction::Incoming)
                     .all(|n| valid[n.index()]),
                 GNode::Gate(RawGate::Mux(ctrl), _) => {
                     valid[self
                         .tgates
-                        .edges_directed(node, Direction::Incoming)
+                        .edges_directed(*node, Direction::Incoming)
                         .filter(|e| e.weight().input_name == (if ctrl { "A" } else { "B" }))
                         .next()
                         .unwrap()
@@ -155,20 +145,20 @@ impl<'a> UnrolledGates<'a> {
         }
         return valid;
     }
-    fn annotate_sensitive(&self) -> Vec<bool> {
+    pub fn annotate_sensitive(&self) -> Vec<bool> {
         let mut sensitive = vec![false; self.tgates.node_count()];
-        for node in self.iter_nodes() {
-            sensitive[node.index()] = match self.tgates[node].0 {
+        for node in self.sorted_gates.iter() {
+            sensitive[node.index()] = match self.tgates[*node].0 {
                 GNode::Gate(RawGate::Reg, _)
                 | GNode::Gate(RawGate::Inv, _)
                 | GNode::Gate(RawGate::BoolBin(_), _) => self
                     .tgates
-                    .neighbors_directed(node, Direction::Incoming)
+                    .neighbors_directed(*node, Direction::Incoming)
                     .any(|n| sensitive[n.index()]),
                 GNode::Gate(RawGate::Mux(ctrl), _) => {
                     sensitive[self
                         .tgates
-                        .edges_directed(node, Direction::Incoming)
+                        .edges_directed(*node, Direction::Incoming)
                         .filter(|e| e.weight().input_name == (if ctrl { "A" } else { "B" }))
                         .next()
                         .unwrap()
@@ -181,23 +171,18 @@ impl<'a> UnrolledGates<'a> {
         }
         return sensitive;
     }
-    fn check_state_cleared(&self, sensitive: Vec<bool>) -> Result<(), CompError<'a>> {
-        for node in self.tgates.node_identifiers() {
-            if let (GNode::Gate(RawGate::Reg, id), c) = self.tgates[node] {
-                if c == self.n_cycles - 1 {
-                    let input = self
-                        .tgates
-                        .neighbors_directed(node, Direction::Incoming)
-                        .next()
-                        .unwrap();
-                    if sensitive[input.index()] {
-                        return Err(CompError::other(
+    pub fn check_state_cleared(&self, sensitive: Vec<bool>) -> Result<(), CompError<'a>> {
+        for (node, g) in self.gadget.gates.node_references() {
+            if let GNode::Gate(RawGate::Reg, id) = g {
+                let input = self.gadget.input(node, "D");
+                if let Some(n) = self.gates2timed.get(&(input, self.n_cycles - 1)) {
+                    if sensitive[n.index()] {
+                        return Err(CompError::ref_nw(
                             &self.gadget.gadget.module,
-                            "",
-                            &format!(
+                            CompErrorKind::Other(format!(
                                 "DFF {}[{}] contains sensitive state past the last output",
                                 id.cell, id.offset
-                            ),
+                            )),
                         ));
                     }
                 }
@@ -205,7 +190,7 @@ impl<'a> UnrolledGates<'a> {
         }
         return Ok(());
     }
-    fn check_outputs_valid(&self, valid: Vec<bool>) -> Result<(), CompError<'a>> {
+    pub fn check_outputs_valid(&self, valid: Vec<bool>) -> Result<(), CompError<'a>> {
         for (output, o_share) in self.outputs.iter() {
             if !valid[output.index()] {
                 return Err(CompError::ref_nw(
@@ -245,7 +230,7 @@ impl<'a> UnrolledGates<'a> {
         }
         return res;
     }
-    fn computation_graph(&self, sensitive: Vec<bool>) -> LeakComputationGraph {
+    pub fn computation_graph(&self, sensitive: Vec<bool>) -> LeakComputationGraph {
         let mut max_eprobes = Vec::<Vec<NodeIndex>>::new();
         let mut outputs = HashMap::new();
         for (node, gate) in self.tgates.node_references() {
@@ -305,13 +290,13 @@ impl<'a> UnrolledGates<'a> {
                 }
                 (GNode::Gate(RawGate::Inv, id), lat) => {
                     let n = cg.add_node(CGNode::Gate(BoolGate::Not, (id, lat)));
-                    cg.add_edge(self.input(*node, "A"), n, ());
+                    cg.add_edge(mapped_gates[self.input(*node, "A").index()].unwrap(), n, ());
                     mapped_gates[node.index()] = Some(n);
                 }
                 (GNode::Gate(RawGate::BoolBin(kind), id), lat) => {
                     let n = cg.add_node(CGNode::Gate(BoolGate::from_kind(kind), (id, lat)));
-                    cg.add_edge(self.input(*node, "A"), n, ());
-                    cg.add_edge(self.input(*node, "B"), n, ());
+                    cg.add_edge(mapped_gates[self.input(*node, "A").index()].unwrap(), n, ());
+                    cg.add_edge(mapped_gates[self.input(*node, "B").index()].unwrap(), n, ());
                     mapped_gates[node.index()] = Some(n);
                 }
                 (GNode::Input(input), lat) => {
@@ -344,8 +329,8 @@ impl<'a> UnrolledGates<'a> {
     }
 }
 
-impl<'a> GadgetGates<'a> {
-    fn from_gadget(gadget: &'a Gadget<'a>) -> Result<Self, CompError<'a>> {
+impl<'a, 'b> GadgetGates<'a, 'b> {
+    pub fn from_gadget(gadget: &'b Gadget<'a>) -> Result<Self, CompError<'a>> {
         let mut gates = petgraph::Graph::new();
         let mut wires = HashMap::new();
         let mut gate_names = HashMap::new();
@@ -408,7 +393,7 @@ impl<'a> GadgetGates<'a> {
                             let ctrl = cell.connections["S"][*offset as usize];
                             Some((RawGate::Mux(ctrl), "Y"))
                         }
-                        ("$inv", _) => Some((RawGate::Inv, "Y")),
+                        ("$not", _) => Some((RawGate::Inv, "Y")),
                         (_, Some(kind)) => Some((RawGate::BoolBin(kind), "Y")),
                         _ => {
                             return Err(CompError::ref_nw(gadget.module, CompErrorKind::Other(format!("The cell {} (port {}[{}]) is connected to a random/sensitive wire but is not a known type of gate (type: {})", cell_name, port_name, offset, cell.cell_type))));
@@ -476,7 +461,10 @@ impl<'a> GadgetGates<'a> {
             .unwrap()
             .source()
     }
-    fn unroll(&'a self, controls: &mut clk_vcd::ModuleControls) -> CResult<'a, UnrolledGates<'a>> {
+    pub fn unroll(
+        &'b self,
+        controls: &mut clk_vcd::ModuleControls,
+    ) -> CResult<'a, UnrolledGates<'a, 'b>> {
         let n_cycles = self.gadget.max_output_lat() + 1;
         let sorted_nodes = self.sort_nodes()?;
         let mut res = Graph::new();
@@ -563,10 +551,11 @@ impl<'a> GadgetGates<'a> {
                 })
             })
             .collect::<HashMap<_, _>>();
+        let sorted_gates = res.node_identifiers().collect::<Vec<_>>();
         Ok(UnrolledGates {
             tgates: res,
             gates2timed: new_nodes,
-            sorted_gates: sorted_nodes,
+            sorted_gates,
             gadget: self,
             outputs,
             n_cycles,
@@ -620,7 +609,7 @@ impl<'a> GadgetGates<'a> {
 }
 
 #[derive(Debug, Clone)]
-enum BoolGate {
+pub enum BoolGate {
     And,
     Or,
     Xor,
@@ -640,14 +629,14 @@ impl BoolGate {
 }
 
 #[derive(Debug, Clone)]
-enum CGNode<'a> {
+pub enum CGNode<'a> {
     Input(GadgetInput<'a>, Latency),
     Gate(BoolGate, (GateId<'a>, Latency)),
     Constant(bool),
 }
 
 #[derive(Debug, Clone)]
-struct LeakComputationGraph<'a> {
+pub struct LeakComputationGraph<'a> {
     cg: Graph<CGNode<'a>, ()>,
     e_probes: Vec<BTreeSet<NodeIndex>>,
     outputs: HashMap<Share<'a>, usize>,

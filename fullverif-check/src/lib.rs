@@ -73,7 +73,6 @@ fn check_gadget<'a, 'b>(
         netlist::GadgetStrat::Assumed => Ok(None),
         netlist::GadgetStrat::Isolate => {
             println!("Checking gadget {}...", gadget_name);
-            println!("Warning: latency annotations correctness is not verified under the 'isolate' strategy, only isolation is verified");
             if gadget.prop != netlist::GadgetProp::Affine {
                 Err(CompError::ref_nw(
                     gadget.module,
@@ -83,6 +82,13 @@ fn check_gadget<'a, 'b>(
                 ))?;
             }
             inner_affine::check_inner_affine(gadget)?;
+            let gg = raw_internals::GadgetGates::from_gadget(gadget)?;
+            let ugg = gg.unroll(controls)?;
+            ugg.check_outputs_valid(ugg.annotate_valid())?;
+            println!("outputs valid");
+            ugg.check_state_cleared(ugg.annotate_sensitive())?;
+            println!("state cleared");
+            let _cg = ugg.computation_graph(ugg.annotate_sensitive());
             Ok(None)
         }
         netlist::GadgetStrat::CompositeProp => {
