@@ -15,18 +15,16 @@ use petgraph::{
 use std::collections::{hash_map, BTreeSet, HashMap};
 use yosys_netlist_json as yosys;
 
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct Share<'a> {
+    sharing: Sharing<'a>,
+    share_id: u32,
+}
 /// Gadget input: share or random
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum GadgetInput<'a> {
-    Random {
-        rnd: Random<'a>,
-        //lats: &'a [Latency],
-    },
-    Share {
-        sharing: Sharing<'a>,
-        share_id: u32,
-        //lats: &'a [Latency],
-    },
+    Random(Random<'a>),
+    Share(Share<'a>),
 }
 
 /// Types of boolean binary gates
@@ -101,9 +99,10 @@ struct UnrolledGates<'a> {
     sorted_gates: Vec<NodeIndex>,
     gadget: &'a GadgetGates<'a>,
     n_cycles: Latency,
+    outputs: HashMap<NodeIndex, Share<'a>>,
 }
 
-// Crazy rust "impl Trait" limitation workaround
+// Hacky rust "impl Trait" limitation workaround
 trait LT<'a> {}
 impl<'a, T> LT<'a> for T {}
 
@@ -207,13 +206,11 @@ impl<'a> UnrolledGates<'a> {
         return Ok(());
     }
     fn check_outputs_valid(&self, valid: Vec<bool>) -> Result<(), CompError<'a>> {
-        for (output, lat) in self.gadget.gadget.outputs.iter() {
-            let o_bitval =
-                self.gadget.gadget.module.ports[output.port_name].bits[output.pos as usize];
-            if !valid[self.gates2timed[&(self.gadget.wires[&o_bitval], *lat)].index()] {
+        for (output, o_share) in self.outputs.iter() {
+            if !valid[output.index()] {
                 return Err(CompError::ref_nw(
                     self.gadget.gadget.module,
-                    CompErrorKind::OutputNotValid(vec![(*output, *lat)]),
+                    CompErrorKind::OutputNotValid(vec![(o_share.sharing, self.tgates[*output].1)]),
                 ));
             }
         }
@@ -250,6 +247,7 @@ impl<'a> UnrolledGates<'a> {
     }
     fn computation_graph(&self, sensitive: Vec<bool>) -> LeakComputationGraph {
         let mut max_eprobes = Vec::<Vec<NodeIndex>>::new();
+        let mut outputs = HashMap::new();
         for (node, gate) in self.tgates.node_references() {
             if sensitive[node.index()] {
                 let no_childs = self
@@ -262,7 +260,13 @@ impl<'a> UnrolledGates<'a> {
                 } else {
                     false
                 };
-                if no_childs || is_reg {
+                let is_output = if let Some(share) = self.outputs.get(&node) {
+                    outputs.insert(*share, max_eprobes.len());
+                    true
+                } else {
+                    false
+                };
+                if is_output || no_childs || is_reg {
                     max_eprobes.push(self.extend_probe(node));
                 }
             }
@@ -334,6 +338,7 @@ impl<'a> UnrolledGates<'a> {
         return LeakComputationGraph {
             cg,
             e_probes,
+            outputs,
             n_shares: self.gadget.gadget.order,
         };
     }
@@ -345,7 +350,7 @@ impl<'a> GadgetGates<'a> {
         let mut wires = HashMap::new();
         let mut gate_names = HashMap::new();
         for rnd in gadget.randoms.keys() {
-            let node = gates.add_node(GNode::Input(GadgetInput::Random { rnd: rnd.clone() }));
+            let node = gates.add_node(GNode::Input(GadgetInput::Random(rnd.clone())));
             wires.insert(
                 gadget.module.ports[rnd.port_name].bits[rnd.offset as usize],
                 node,
@@ -354,10 +359,10 @@ impl<'a> GadgetGates<'a> {
         for sharing in gadget.inputs.keys() {
             for i in 0..gadget.order {
                 let offset = sharing.pos * gadget.order + i;
-                let node = gates.add_node(GNode::Input(GadgetInput::Share {
+                let node = gates.add_node(GNode::Input(GadgetInput::Share(Share {
                     sharing: sharing.clone(),
                     share_id: i,
-                }));
+                })));
                 wires.insert(
                     gadget.module.ports[sharing.port_name].bits[offset as usize],
                     node,
@@ -517,19 +522,17 @@ impl<'a> GadgetGates<'a> {
                             new_nodes.insert((*node, cycle), new_node);
                         }
                     }
-                    GNode::Input(GadgetInput::Random { rnd }) => {
+                    GNode::Input(GadgetInput::Random(rnd)) => {
                         if crate::tg_graph::is_rnd_valid(self.gadget, &rnd, cycle, controls)? {
                             let new_node =
-                                res.add_node((GNode::Input(GadgetInput::Random { rnd }), cycle));
+                                res.add_node((GNode::Input(GadgetInput::Random(rnd)), cycle));
                             new_nodes.insert((*node, cycle), new_node);
                         }
                     }
-                    GNode::Input(GadgetInput::Share { sharing, share_id }) => {
-                        if self.gadget.inputs[&sharing].contains(&cycle) {
-                            let new_node = res.add_node((
-                                GNode::Input(GadgetInput::Share { sharing, share_id }),
-                                cycle,
-                            ));
+                    GNode::Input(GadgetInput::Share(share)) => {
+                        if self.gadget.inputs[&share.sharing].contains(&cycle) {
+                            let new_node =
+                                res.add_node((GNode::Input(GadgetInput::Share(share)), cycle));
                             new_nodes.insert((*node, cycle), new_node);
                         }
                     }
@@ -541,15 +544,34 @@ impl<'a> GadgetGates<'a> {
                 }
             }
         }
+        let outputs = self
+            .gadget
+            .outputs
+            .iter()
+            .flat_map(|(output, lat)| {
+                let gates2timed = &new_nodes;
+                (0..self.gadget.order).map(move |i| {
+                    let o_bitval = self.gadget.module.ports[output.port_name].bits
+                        [(self.gadget.order * output.pos + i) as usize];
+                    (
+                        gates2timed[&(self.wires[&o_bitval], *lat)],
+                        Share {
+                            sharing: *output,
+                            share_id: i,
+                        },
+                    )
+                })
+            })
+            .collect::<HashMap<_, _>>();
         Ok(UnrolledGates {
             tgates: res,
             gates2timed: new_nodes,
             sorted_gates: sorted_nodes,
             gadget: self,
+            outputs,
             n_cycles,
         })
     }
-
     fn wire_value(
         &self,
         wire: yosys::BitVal,
@@ -628,5 +650,6 @@ enum CGNode<'a> {
 struct LeakComputationGraph<'a> {
     cg: Graph<CGNode<'a>, ()>,
     e_probes: Vec<BTreeSet<NodeIndex>>,
+    outputs: HashMap<Share<'a>, usize>,
     n_shares: u32,
 }
