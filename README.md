@@ -7,7 +7,7 @@ checks that the larger composite circuit is secure by using a compositional
 strategy (e.g.  based on PINI, SNI, NI).
 
 For more background on compositional strategies for masked hardware
-implementations, see [the paper](https://eprint.iacr.org/2020/TODO) on which
+implementations, see [the paper](https://eprint.iacr.org/2020/185) on which
 this tool is based.
 
 ## Principle
