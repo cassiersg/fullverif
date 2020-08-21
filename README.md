@@ -326,3 +326,28 @@ See [LICENSE-GPL3](LICENSE-GPL3), [LICENSE-APACHE](LICENSE-APACHE),
   computation graph. Analysis of control signals and simplification.
 - `comp_prop.rs`: checking of the compositional strategy based on the
   computation graph.
+
+## Performance
+
+The computational complexity of the tool is linear in the number of gadgets and
+quadratic in the number of shares (like a simulation tool). Practically,
+fullVerif is fast enough to be used "interactively" when developing or
+debugging an implementation: its overhead on top of the behavioral simulation
+of one encryption is at most 3 seconds for a full [PRESENT cipher
+implementation](https://github.com/cassiersg/present_hpc) with up to 16 shares.
+
+The figure below shows the execution time of the tool for an implementation of PRESENT.
+The execution time is split among:
+
+- iverilog and vvp: behavioral simulation of the circuit,
+- yosys: abstract synthesis,
+- fullverif: the fullverif tool itself.
+
+The total time can be compared to the behavioral simulation time, which is
+arguably the first tool in the toolbox of a digital designer.
+
+On the x-axis, NSBOX is the number of parallel S-box instantiated in the
+circuit, and D is the number of shares of the masking.
+
+![Performance for PRESENT](timing_present.png)
+
