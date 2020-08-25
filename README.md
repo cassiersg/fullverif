@@ -336,6 +336,8 @@ debugging an implementation: its overhead on top of the behavioral simulation
 of one encryption is at most 3 seconds for a full [PRESENT cipher
 implementation](https://github.com/cassiersg/present_hpc) with up to 16 shares.
 
+Execution time is faster when the verification fails.
+
 The figure below shows the execution time of the tool for an implementation of PRESENT.
 The execution time is split among:
 
@@ -350,4 +352,11 @@ On the x-axis, NSBOX is the number of parallel S-box instantiated in the
 circuit, and D is the number of shares of the masking.
 
 ![Performance for PRESENT](timing_present.png)
+
+## Tips and Tricks
+
+Reducing the number of rounds in the cipher during the development of the
+cipher reduces the verification time (mostly the simulation is faster), and
+this also reduces in some cases the number of errors shown by fullverif (when
+the errors occurs at every round).
 
