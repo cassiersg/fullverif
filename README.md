@@ -338,7 +338,8 @@ implementation](https://github.com/cassiersg/present_hpc) with up to 16 shares.
 
 Execution time is faster when the verification fails.
 
-The figure below shows the execution time of the tool for an implementation of PRESENT.
+The figure below shows the execution time of the tool for an implementation of
+PRESENT (running on an Intel(R) Core(TM) i7-8650U CPU @ 1.90GHz with 8 GB RAM).
 The execution time is split among:
 
 - iverilog and vvp: behavioral simulation of the circuit,
