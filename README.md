@@ -40,7 +40,7 @@ Once those control signals are known, the dataflow can be computed and analyzed.
 ### Test (unix-like)
 
 Assuming Yosys and Iverilog are installed in `/usr/local` (otherwise, edit the
-script `fullverif.sh` accordingly).
+script `main.sh` accordingly).
 
 - `git clone https://github.com/cassiersg/present_hpc.git`
 - `./fullverif/main.sh present_hpc MSKpresent_encrypt tb_present_128`
