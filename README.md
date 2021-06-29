@@ -28,7 +28,7 @@ Once those control signals are known, the dataflow can be computed and analyzed.
 
 **Dependencies**:
 - `yosys >= 0.9` <http://www.clifford.at/yosys/>
-- `iverilog >= 10.4` or git master <https://github.com/steveicarus/iverilog>
+- `iverilog >= 11.0` or git master <https://github.com/steveicarus/iverilog>
   (commit `f2ca63a5a110` has been tested)
 - rust development toolchain (rustc, cargo) (`>=1.38`) <https://rustup.rs/>
 
