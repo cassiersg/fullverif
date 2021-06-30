@@ -35,6 +35,27 @@ fn get_str_attr<'a>(
     }
 }
 
+/// Convert an attribute to an u32 if possible
+fn attr2int(attr: &yosys::AttributeVal) -> Result<u32, ()> {
+    match attr {
+        yosys::AttributeVal::N(x) if TryInto::<u32>::try_into(*x).is_ok() => {
+            Ok(TryInto::<u32>::try_into(*x).unwrap())
+        }
+        yosys::AttributeVal::S(s) if s.len() <= 32 && s.chars().all(|x| x == '0' || x == '1') => {
+            Ok(s.chars()
+                .rev()
+                .enumerate()
+                .map(|(i, c)| match c {
+                    '0' => 0,
+                    '1' => 1 << i,
+                    _ => unreachable!(),
+                })
+                .sum())
+        }
+        _ => Err(()),
+    }
+}
+
 /// Return the attribute `attr` on the net `netname` in `module` as an integer.
 /// If the attribute is not present, return None.
 /// If it has not the correct type (or overflows), return an Err.
@@ -44,11 +65,9 @@ fn get_int_attr<'a>(
     attr: &str,
 ) -> Result<Option<i32>, CompError<'a>> {
     if let Some(attr_v) = module.netnames[netname].attributes.get(attr) {
-        match attr_v {
-            yosys::AttributeVal::N(x) if TryInto::<u32>::try_into(*x).is_ok() => {
-                Ok(Some(TryInto::<u32>::try_into(*x).unwrap() as i32))
-            }
-            _ => Err(CompError::ref_sn(
+        match attr2int(attr_v) {
+            Ok(x) => Ok(Some(x as i32)),
+            Err(()) => Err(CompError::ref_sn(
                 module,
                 netname,
                 CompErrorKind::WrongAnnotation(attr.to_owned(), attr_v.clone()),
@@ -346,14 +365,15 @@ pub fn module_strat<'a>(module: &'a yosys::Module) -> Result<GadgetStrat, CompEr
 /// Get the masking number of shares of a module.
 /// Returns Err if the annotation is invalid of missing.
 pub fn module_order<'a>(module: &'a yosys::Module) -> Result<u32, CompError<'a>> {
-    match module.attributes.get("fv_order").ok_or_else(|| {
+    let attr = module.attributes.get("fv_order").ok_or_else(|| {
         CompError::ref_nw(
             module,
             CompErrorKind::MissingAnnotation("fv_order".to_owned()),
         )
-    })? {
-        yosys::AttributeVal::N(order) if *order >= 1 => Ok(*order as u32),
-        attr => Err(CompError::ref_nw(
+    })?;
+    match attr2int(attr) {
+        Ok(x) if x >= 1 => Ok(x as u32),
+        _ => Err(CompError::ref_nw(
             module,
             CompErrorKind::WrongAnnotation("fv_order".to_owned(), attr.clone()),
         )),
