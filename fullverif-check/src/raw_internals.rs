@@ -31,17 +31,27 @@ pub enum GadgetInput<'a> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BoolBinKind {
     And,
+    Nand,
     Or,
+    Nor,
     Xor,
     Xnor,
+    AndNot,
+    OrNot,
+    Nmux,
 }
 impl BoolBinKind {
     fn from_str(s: &str) -> Option<Self> {
         match s {
-            "$and" => Some(Self::And),
-            "$or" => Some(Self::Or),
-            "$xor" => Some(Self::Xor),
-            "$xnor" => Some(Self::Xnor),
+            "$and" | "$_AND_" => Some(Self::And),
+            "$_NAND_" => Some(Self::Nand),
+            "$or" | "$_OR_" => Some(Self::Or),
+            "$_NOR_" => Some(Self::Nor),
+            "$xor" | "$_XOR_" => Some(Self::Xor),
+            "$xnor" | "$_XNOR_" => Some(Self::Xnor),
+            "$_ANDNOT_" => Some(Self::AndNot),
+            "$_ORNOT_" => Some(Self::OrNot),
+            "$_NMUX_" => Some(Self::Nmux),
             _ => None,
         }
     }
@@ -294,7 +304,7 @@ impl<'a: 'b, 'b> UnrolledGates<'a, 'b> {
                     mapped_gates[node.index()] = Some(n);
                 }
                 (GNode::Gate(RawGate::BoolBin(kind), id), lat) => {
-                    let n = cg.add_node(CGNode::Gate(BoolGate::from_kind(kind), (id, lat)));
+                    let n = cg.add_node(CGNode::Gate(BoolGate::from_bin_kind(kind), (id, lat)));
                     cg.add_edge(mapped_gates[self.input(*node, "A").index()].unwrap(), n, ());
                     cg.add_edge(mapped_gates[self.input(*node, "B").index()].unwrap(), n, ());
                     mapped_gates[node.index()] = Some(n);
@@ -610,21 +620,13 @@ impl<'a, 'b> GadgetGates<'a, 'b> {
 
 #[derive(Debug, Clone)]
 pub enum BoolGate {
-    And,
-    Or,
-    Xor,
-    Xnor,
     Not,
+    Bin(BoolBinKind),
 }
 
 impl BoolGate {
-    fn from_kind(kind: BoolBinKind) -> Self {
-        match kind {
-            BoolBinKind::And => Self::And,
-            BoolBinKind::Or => Self::Or,
-            BoolBinKind::Xor => Self::Xor,
-            BoolBinKind::Xnor => Self::Xnor,
-        }
+    fn from_bin_kind(kind: BoolBinKind) -> Self {
+        Self::Bin(kind)
     }
 }
 

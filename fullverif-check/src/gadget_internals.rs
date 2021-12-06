@@ -336,6 +336,17 @@ fn module2randoms<'a>(
             if let hash_map::Entry::Vacant(entry) = rnd_gates.entry(gate_id) {
                 let cell = &gadget.module.cells[*cell_name];
                 let output = match cell.cell_type.as_str() {
+                    "$_DFF_N_" => {
+                        assert_eq!(
+                            Some(&cell.connections["C"]),
+                            clock_bitval,
+                            "Wrong clock on random DFF"
+                        );
+                        entry.insert(RndGate::Reg {
+                            input: wires2rnds[bitval],
+                        });
+                        Some(&cell.connections["Q"][*offset as usize])
+                    }
                     "$dff" => {
                         assert_eq!(
                             Some(&cell.connections["CLK"]),
@@ -354,7 +365,7 @@ fn module2randoms<'a>(
                         });
                         Some(&cell.connections["Q"][*offset as usize])
                     }
-                    "$mux" => {
+                    "$mux" | "$_MUX_" => {
                         entry.insert(RndGate::Mux {
                             ina: RndConnection::Gate(RndGateId::new("", 0)),
                             inb: RndConnection::Gate(RndGateId::new("", 0)),
