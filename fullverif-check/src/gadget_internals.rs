@@ -336,7 +336,7 @@ fn module2randoms<'a>(
             if let hash_map::Entry::Vacant(entry) = rnd_gates.entry(gate_id) {
                 let cell = &gadget.module.cells[*cell_name];
                 let output = match cell.cell_type.as_str() {
-                    "$_DFF_N_" => {
+                    "$_DFF_P_" => {
                         assert_eq!(
                             Some(&cell.connections["C"]),
                             clock_bitval,
