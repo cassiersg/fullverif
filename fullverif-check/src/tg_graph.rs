@@ -597,11 +597,17 @@ impl<'a, 'b> AGadgetFlow<'a, 'b> {
     pub fn list_valid(&self) -> HashMap<GName<'a>, Vec<Latency>> {
         let mut gadgets = HashMap::new();
         for (id, gadget) in self.gadgets() {
-            if gadget.base.kind.prop != netlist::GadgetProp::Mux && self.gadget_valid(id) {
-                gadgets
-                    .entry(gadget.name.0)
-                    .or_insert_with(Vec::new)
-                    .push(gadget.name.1);
+            if gadget.base.kind.prop != netlist::GadgetProp::Mux {
+                if self.gadget_valid(id) {
+                    gadgets
+                        .entry(gadget.name.0)
+                        .or_insert_with(Vec::new)
+                        .push(gadget.name.1);
+                } else {
+                    gadgets
+                        .entry(gadget.name.0)
+                        .or_insert_with(Vec::new);
+                }
             }
         }
         for cycles in gadgets.values_mut() {

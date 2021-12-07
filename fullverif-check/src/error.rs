@@ -12,6 +12,7 @@ use crate::gadget_internals::{self, GName, RndConnection};
 use crate::gadgets::{self, Latency};
 use crate::netlist;
 use crate::tg_graph;
+use crate::utils::format_set;
 use std::collections::HashMap;
 use yosys_netlist_json as yosys;
 
@@ -321,9 +322,48 @@ impl<'a> fmt::Display for CompError<'a> {
             }
             CompErrorKind::ExcedentaryOutput(outputs) => {
                 writeln!(f, "The following outputs are valid (although annotation specifies they should not be valid):")?;
+                // Map { cycle -> Map { sharing_port_name -> List { sharing_offset } } }
+                let mut exc_outputs: HashMap<u32, HashMap<&str, Vec<u32>>> = HashMap::new();
                 for (sharing, cycle) in outputs {
-                    writeln!(f, "\tOutput {} at cycle {}", sharing, cycle)?;
+                    exc_outputs.entry(*cycle).or_insert_with(HashMap::new).entry(sharing.port_name).or_insert_with(Vec::new).push(sharing.pos);
                 }
+                // Map { cycle -> List { (sharing_port_name, List { sharing_offset } ) }
+                let exc_outputs: HashMap<u32, Vec<(&str, Vec<u32>)>> = 
+                    exc_outputs.into_iter().map(|(cycle, sharings)| {
+                         let mut s = sharings.into_iter().collect::<Vec<_>>();
+                         s.sort_unstable();
+                         (cycle, s)
+                    }).collect();
+                // Map { Vec { (sharing_port_name, List { sharing_offset }) } -> List { cycle } }
+                let mut exc_outputs_rev: HashMap<&Vec<(&str, Vec<u32>)>, Vec<u32>> = HashMap::new();
+                for (cycle, map) in exc_outputs.iter() {
+                    exc_outputs_rev.entry(map).or_insert_with(Vec::new).push(*cycle);
+                }
+                let exc_outputs_grouped: HashMap<_, _> = exc_outputs_rev.iter().map(|(map, cycles)| (cycles, map)).collect();
+                let mut cycles_grouped: Vec<_> = exc_outputs_grouped.keys().collect();
+                cycles_grouped.sort_unstable();
+                let mut exc_output_ports: Vec<&str> = Vec::new();
+                for cycles in cycles_grouped {
+                    writeln!(f, "\tCycles {}", format_set(cycles.iter().copied()))?;
+                    for (exc_output, sharings) in exc_outputs_grouped[cycles].iter() {
+                        writeln!(f, "\t\tOutput port {}, shares {}", exc_output, format_set(sharings.iter().cloned()))?;
+                    }
+                    exc_output_ports.clear();
+                }
+                /*
+                let mut exc_outputs_cycles: Vec<_> = exc_outputs.keys().collect();
+                exc_outputs_cycles.sort_unstable();
+                let mut exc_output_ports: Vec<&str> = Vec::new();
+                for cycle in exc_outputs_cycles {
+                    writeln!(f, "\tCycle {}", cycle)?;
+                    exc_output_ports.extend(exc_outputs[cycle].keys());
+                    exc_output_ports.sort_unstable();
+                    for exc_output in &exc_output_ports {
+                        writeln!(f, "\t\tOutput port {}, shares {}", exc_output, format_set(exc_outputs[cycle][exc_output].iter().cloned()))?;
+                    }
+                    exc_output_ports.clear();
+                }
+                */
             }
             CompErrorKind::Vcd => {
                 writeln!(f, "Error in the format of the vcd file.")?;

@@ -25,7 +25,7 @@ yosys hierarchy -check -libdir $IMPLEM_DIR -libdir $FULLVERIF_LIB_DIR -top $MAIN
 yosys proc;
 # Map some 'high-level' modules coming from verilog constructs to lower level modules.
 # e.g. array indexing is mapped to a 'shiftx' at the previous step, we lower it now to muxes
-yosys techmap -map $TECHMAP_PATH;
+yosys techmap
 
 # Flatten all user-level module whose check strategy is 'flatten'
 yosys setattr -mod -set keep_hierarchy 1 *;

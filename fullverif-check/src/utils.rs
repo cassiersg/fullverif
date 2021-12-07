@@ -48,5 +48,8 @@ pub fn format_set<T: Int>(it: impl Iterator<Item = T>) -> String {
             res.push_str(&format!("{{{}, ..., {}}}", start, end));
         }
     }
+    if res.is_empty() {
+        res.push_str("{}");
+    }
     res
 }

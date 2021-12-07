@@ -123,8 +123,10 @@ fn check_gadget<'a, 'b>(
                 _a_graph.disp_full();
             }
             println!("Valid gadgets:");
-            for (g, c) in _a_graph.list_valid() {
-                println!("\t{}: {}", g, format_set(c.into_iter()));
+            let mut valid_gadgets: Vec<String> = _a_graph.list_valid().into_iter().map(|(g, c)| format!("\t{}: {}", g, format_set(c.into_iter()))).collect();
+            valid_gadgets.sort_unstable();
+            for vg in valid_gadgets {
+                println!("{}", vg);
             }
             println!("Sensitive gadgets:");
             for (g, c) in _a_graph.list_sensitive() {
