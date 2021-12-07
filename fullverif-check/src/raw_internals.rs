@@ -381,6 +381,14 @@ impl<'a, 'b> GadgetGates<'a, 'b> {
                     let cell = &gadget.module.cells[*cell_name];
                     let cell_type = cell.cell_type.as_str();
                     let output = match (cell_type, BoolBinKind::from_str(cell_type)) {
+                        ("$_DFF_P_", _) => {
+                            assert_eq!(
+                                Some(&cell.connections["C"]),
+                                clock_bitval,
+                                "Wrong clock on random DFF"
+                            );
+                            Some((RawGate::Reg, "Q"))
+                        }
                         ("$dff", _) => {
                             assert_eq!(
                                 Some(&cell.connections["CLK"]),
