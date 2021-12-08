@@ -90,6 +90,7 @@ pub enum CompErrorKind<'a> {
     ),
     OutputNotValid(Vec<(gadgets::Sharing<'a>, Latency)>),
     ExcedentaryOutput(Vec<(gadgets::Sharing<'a>, Latency)>),
+    MixedOrder(GName<'a>, u32, u32),
     Vcd,
 }
 
@@ -325,28 +326,46 @@ impl<'a> fmt::Display for CompError<'a> {
                 // Map { cycle -> Map { sharing_port_name -> List { sharing_offset } } }
                 let mut exc_outputs: HashMap<u32, HashMap<&str, Vec<u32>>> = HashMap::new();
                 for (sharing, cycle) in outputs {
-                    exc_outputs.entry(*cycle).or_insert_with(HashMap::new).entry(sharing.port_name).or_insert_with(Vec::new).push(sharing.pos);
+                    exc_outputs
+                        .entry(*cycle)
+                        .or_insert_with(HashMap::new)
+                        .entry(sharing.port_name)
+                        .or_insert_with(Vec::new)
+                        .push(sharing.pos);
                 }
                 // Map { cycle -> List { (sharing_port_name, List { sharing_offset } ) }
-                let exc_outputs: HashMap<u32, Vec<(&str, Vec<u32>)>> = 
-                    exc_outputs.into_iter().map(|(cycle, sharings)| {
-                         let mut s = sharings.into_iter().collect::<Vec<_>>();
-                         s.sort_unstable();
-                         (cycle, s)
-                    }).collect();
+                let exc_outputs: HashMap<u32, Vec<(&str, Vec<u32>)>> = exc_outputs
+                    .into_iter()
+                    .map(|(cycle, sharings)| {
+                        let mut s = sharings.into_iter().collect::<Vec<_>>();
+                        s.sort_unstable();
+                        (cycle, s)
+                    })
+                    .collect();
                 // Map { Vec { (sharing_port_name, List { sharing_offset }) } -> List { cycle } }
                 let mut exc_outputs_rev: HashMap<&Vec<(&str, Vec<u32>)>, Vec<u32>> = HashMap::new();
                 for (cycle, map) in exc_outputs.iter() {
-                    exc_outputs_rev.entry(map).or_insert_with(Vec::new).push(*cycle);
+                    exc_outputs_rev
+                        .entry(map)
+                        .or_insert_with(Vec::new)
+                        .push(*cycle);
                 }
-                let exc_outputs_grouped: HashMap<_, _> = exc_outputs_rev.iter().map(|(map, cycles)| (cycles, map)).collect();
+                let exc_outputs_grouped: HashMap<_, _> = exc_outputs_rev
+                    .iter()
+                    .map(|(map, cycles)| (cycles, map))
+                    .collect();
                 let mut cycles_grouped: Vec<_> = exc_outputs_grouped.keys().collect();
                 cycles_grouped.sort_unstable();
                 let mut exc_output_ports: Vec<&str> = Vec::new();
                 for cycles in cycles_grouped {
                     writeln!(f, "\tCycles {}", format_set(cycles.iter().copied()))?;
                     for (exc_output, sharings) in exc_outputs_grouped[cycles].iter() {
-                        writeln!(f, "\t\tOutput port {}, shares {}", exc_output, format_set(sharings.iter().cloned()))?;
+                        writeln!(
+                            f,
+                            "\t\tOutput port {}, shares {}",
+                            exc_output,
+                            format_set(sharings.iter().cloned())
+                        )?;
                     }
                     exc_output_ports.clear();
                 }
@@ -364,6 +383,13 @@ impl<'a> fmt::Display for CompError<'a> {
                     exc_output_ports.clear();
                 }
                 */
+            }
+            CompErrorKind::MixedOrder(subgadget, sg_order, cur_order) => {
+                writeln!(
+                    f,
+                    "Sub-gadget {} has order {}, must be equal to instantiating gadget order {}.",
+                    subgadget, sg_order, cur_order
+                )?;
             }
             CompErrorKind::Vcd => {
                 writeln!(f, "Error in the format of the vcd file.")?;

@@ -126,6 +126,16 @@ impl<'a, 'b> GadgetInternals<'a, 'b> {
         let (rnd_gates, rnd_map) = module2randoms(gadget, lib_gadgets)?;
         for (cell_name, cell) in gadget.module.cells.iter() {
             if let Some(sg) = lib_gadgets.get(&cell.cell_type.as_str().into()) {
+                if sg.order != gadget.order {
+                    Err(CompError::ref_nw(
+                        gadget.module,
+                        CompErrorKind::MixedOrder(
+                            cell_name.as_str().into(),
+                            sg.order,
+                            gadget.order,
+                        ),
+                    ))?;
+                }
                 let random_connections = sg
                     .randoms
                     .keys()
