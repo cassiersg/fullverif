@@ -411,7 +411,7 @@ impl<'a, 'b> GadgetGates<'a, 'b> {
                             let ctrl = cell.connections["S"][*offset as usize];
                             Some((RawGate::Mux(ctrl), "Y"))
                         }
-                        ("$not", _) => Some((RawGate::Inv, "Y")),
+                        ("$not", _) | ("$_NOT_", _) => Some((RawGate::Inv, "Y")),
                         (_, Some(kind)) => Some((RawGate::BoolBin(kind), "Y")),
                         _ => {
                             return Err(CompError::ref_nw(gadget.module, CompErrorKind::Other(format!("The cell {} (port {}[{}]) is connected to a random/sensitive wire but is not a known type of gate (type: {})", cell_name, port_name, offset, cell.cell_type))));
