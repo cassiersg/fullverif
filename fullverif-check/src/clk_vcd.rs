@@ -109,10 +109,13 @@ impl VcdStates {
                 }
             } else {
                 fn scope_id(s: &vcd::ScopeItem) -> &str {
-                    match s {
+                    let res = match s {
                         vcd::ScopeItem::Var(v) => &v.reference,
                         vcd::ScopeItem::Scope(s) => &s.identifier,
-                    }
+                    };
+                    // Remove leading backslash, in case the vcd is encoded using the "escaped
+                    // identifier" syntax of verilog.
+                    res.strip_prefix("\\").unwrap_or(res)
                 }
                 match scope.iter().enumerate().find(|(_, s)| scope_id(s) == n) {
                     Some((i, s)) => {
