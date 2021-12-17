@@ -66,6 +66,7 @@ fn check_gadget<'a, 'b>(
     gadget_name: gadgets::GKind<'a>,
     check_state_cleared: bool,
     check_rnd_annot: bool,
+    check_transitions: bool,
     controls: &mut clk_vcd::ModuleControls,
 ) -> CResult<'a, Option<tg_graph::AGadgetFlow<'a, 'b>>> {
     let gadget = &gadgets[&gadget_name];
@@ -140,7 +141,7 @@ fn check_gadget<'a, 'b>(
             println!("Outputs valid: ok.");
             println!("Inputs exist.");
             for name in _a_graph.warn_useless_rnd() {
-                println!("Warning: the gadget {:?} is not valid, although it has sensitive inputs and then requiring fresh randomness. If you didn't mean for it to be valid, consider muxing the inputs in order to make them non-sensitive when you don't use the gadget.", name);
+                println!("Warning: the gadget {:?} does not perform valid computations, but it has sensitive inputs, hence requires randomness to not leak them. Consider muxing the sensitive inputs to avoid wasting randomness.", name);
             }
             let _rnd_times2 = _a_graph.randoms_input_timing(controls)?;
             println!("Randoms timed");
@@ -156,6 +157,9 @@ fn check_gadget<'a, 'b>(
             }
             if check_state_cleared {
                 _a_graph.check_state_cleared()?;
+            }
+            if check_transitions {
+                _a_graph.check_parallel_seq_gadgets()?;
             }
             comp_prop::check_sec_prop(&_a_graph)?;
             println!("check successful for gadget {}", gadget_name);
@@ -174,6 +178,7 @@ fn check_gadget_top<'a>(
     clk: String,
     input_valid_signal: String,
     check_state_cleared: bool,
+    check_transitions: bool,
 ) -> Result<(), CompErrors<'a>> {
     let gadget_name = gadget_name.into();
     let gadgets = gadgets::netlist2gadgets(netlist)?;
@@ -239,6 +244,7 @@ fn check_gadget_top<'a>(
         gadget_name,
         check_state_cleared,
         false,
+        check_transitions,
         &mut controls,
     )?;
     let g_graph = if let Some(x) = g_graph {
@@ -250,7 +256,7 @@ fn check_gadget_top<'a>(
 
     let mut gadgets_to_check: Vec<(gadgets::GKind, _)> = Vec::new();
     // FIXME Should also check "only glitch" gadgets
-    for ((name, cycle), base) in g_graph.sensitive_gadgets() {
+    for ((name, cycle), base) in g_graph.sensitive_stable_gadgets() {
         let gadget_name = base.kind.name;
         let controls = controls.submodule((*name.get()).to_owned(), cycle as usize);
         gadgets_to_check.push((gadget_name, controls));
@@ -276,11 +282,12 @@ fn check_gadget_top<'a>(
             sg_name,
             check_state_cleared,
             true,
+            check_transitions,
             &mut sg_controls,
         )?;
         if let Some(ur_sg) = ur_sg {
-            // Should also check "only glitch" gadgets
-            for ((name, cycle), base) in ur_sg.sensitive_gadgets() {
+            // FIXME Should also check "only glitch" gadgets
+            for ((name, cycle), base) in ur_sg.sensitive_stable_gadgets() {
                 gadgets_to_check.push((
                     base.kind.name,
                     sg_controls.submodule((*name.get()).to_owned(), cycle as usize),
@@ -318,6 +325,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.clk.clone(),
         config.in_valid.clone(),
         config.check_state_cleared,
+        config.check_transitions,
     )
     .map_err(|e| format!("{}", e))?;
     Ok(())

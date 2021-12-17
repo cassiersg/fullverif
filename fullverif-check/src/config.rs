@@ -12,6 +12,7 @@ pub struct Config {
     pub dut: String,
     pub clk: String,
     pub check_state_cleared: bool,
+    pub check_transitions: bool,
 }
 
 pub fn parse_cmd_line() -> Config {
@@ -76,6 +77,12 @@ pub fn parse_cmd_line() -> Config {
                 .help("Skip verification that state is empty of valid sharings after last cycle.")
                 .takes_value(false),
         )
+        .arg(
+            Arg::with_name("no_check_transitions")
+                .long("no-check-transitions")
+                .help("Skip verification that the circuit is transition-robust.")
+                .takes_value(false),
+        )
         .get_matches();
     let json = matches.value_of("json").unwrap().to_owned();
     let vcd = matches.value_of("vcd").unwrap().to_owned();
@@ -85,6 +92,7 @@ pub fn parse_cmd_line() -> Config {
     let dut = matches.value_of("dut").unwrap().to_owned();
     let clk = matches.value_of("clock").unwrap().to_owned();
     let check_state_cleared = !matches.is_present("no_check_state_cleared");
+    let check_transitions = !matches.is_present("no_check_transitions");
     Config {
         json,
         vcd,
@@ -94,5 +102,6 @@ pub fn parse_cmd_line() -> Config {
         dut,
         clk,
         check_state_cleared,
+        check_transitions,
     }
 }
