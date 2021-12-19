@@ -134,7 +134,11 @@ fn check_gadget<'a, 'b>(
                 println!("{}", vg);
             }
             println!("Sensitive gadgets:");
-            for (g, c) in _a_graph.list_sensitive() {
+            for (g, c) in _a_graph.list_sensitive(tg_graph::Sensitive::Yes) {
+                println!("\t{}: {}", g, format_set(c.into_iter()));
+            }
+            println!("Glitch-sensitive gadgets:");
+            for (g, c) in _a_graph.list_sensitive(tg_graph::Sensitive::Glitch) {
                 println!("\t{}: {}", g, format_set(c.into_iter()));
             }
             _a_graph.check_valid_outputs()?;

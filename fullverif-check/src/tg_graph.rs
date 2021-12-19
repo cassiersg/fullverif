@@ -600,14 +600,12 @@ impl<'a, 'b> AGadgetFlow<'a, 'b> {
     }
     /// Is the gadget n sensitive, that is, is any of the inputs of node n sensitive (in the
     /// glitch or non-glitch domain) ?
-    #[allow(dead_code)]
     pub fn gadget_sensitive(&self, n: NodeIndex) -> bool {
         self.gadget_sensitivity(n) != Sensitive::No
     }
 
     /// Is the gadget n sensitive, that is, is any of the inputs of node n sensitive (in the
     /// non-glitch domain) ?
-    /// TODO: are all uses of this function ok (shouldn't they care about glitches ?)
     fn gadget_sensitive_stable(&self, n: NodeIndex) -> bool {
         self.gadget_sensitivity(n) == Sensitive::Yes
     }
@@ -634,11 +632,11 @@ impl<'a, 'b> AGadgetFlow<'a, 'b> {
     }
 
     /// List the latencies at which each gadget is sensitive.
-    /// TODO check users don't care about glitches
-    pub fn list_sensitive(&self) -> HashMap<GName<'a>, Vec<Latency>> {
+    pub fn list_sensitive(&self, sensitivity: Sensitive) -> HashMap<GName<'a>, Vec<Latency>> {
         let mut gadgets = HashMap::new();
         for (id, gadget) in self.gadgets() {
-            if gadget.base.kind.prop != netlist::GadgetProp::Mux && self.gadget_sensitive_stable(id)
+            if gadget.base.kind.prop != netlist::GadgetProp::Mux
+                && self.gadget_sensitivity(id) == sensitivity
             {
                 gadgets
                     .entry(gadget.name.0)
@@ -657,7 +655,7 @@ impl<'a, 'b> AGadgetFlow<'a, 'b> {
         self.gadgets()
             .filter(|(idx, gadget)| {
                 !gadget.random_connections.is_empty()
-                    && self.gadget_sensitive_stable(*idx) // FIXME this should only warn if there is no sensitive glitches
+                    && self.gadget_sensitive(*idx)
                     && !self.gadget_valid(*idx)
             })
             .map(|(_, g)| g.name)
@@ -760,8 +758,7 @@ impl<'a, 'b> AGadgetFlow<'a, 'b> {
                 let rnd_in =
                     random_to_input(&self.internals, controls, gadget, conn, &mut name_cache);
                 if let Err(e) = &rnd_in {
-                    if self.gadget_sensitive_stable(idx) {
-                        // FIXME this should add error also for glitches ?
+                    if self.gadget_sensitive(idx) {
                         errors.extend_from_slice(&e.0);
                     }
                 }
@@ -787,11 +784,7 @@ impl<'a, 'b> AGadgetFlow<'a, 'b> {
         let mut res: HashMap<TRandom<'a>, (Name<'a>, TRandom<'a>)> = HashMap::new();
         for (in_rnd, uses) in rnd_input2use.iter() {
             assert!(!uses.is_empty());
-            if uses
-                .iter()
-                .any(|(idx, _)| self.gadget_sensitive_stable(*idx))
-            {
-                // FIXME this should care about glitches ?
+            if uses.iter().any(|(idx, _)| self.gadget_sensitive(*idx)) {
                 if uses.len() > 1 {
                     let random_uses = uses
                         .iter()

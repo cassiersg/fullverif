@@ -27,10 +27,11 @@ DUT=dut
 SCRIPT=$(readlink -f "$0")
 SCRIPTPATH=$(dirname "$SCRIPT")
 
-IV=/usr/local/bin/iverilog
-VVP=/usr/local/bin/vvp
-YOSYS_BIN=/usr/local/bin/yosys
+IV=$(which iverilog)
+VVP=$(which vvp)
+YOSYS_BIN=$(which yosys)
 # Change only if you did not install fullverif from sources or if you moved this script.
+#FULL_VERIF=$SCRIPTPATH/fullverif-check/target/debug/fullverif
 FULL_VERIF=$SCRIPTPATH/fullverif-check/target/release/fullverif
 export FULLVERIF_LIB_DIR=$SCRIPTPATH/lib_v
 
@@ -38,6 +39,8 @@ export FULLVERIF_LIB_DIR=$SCRIPTPATH/lib_v
 
 export OUT_DIR=`mktemp -d -t fullverif-XXXXXXXXXXXXXXXX`
 echo "Temp files are written in $OUT_DIR"
+rm -f /tmp/fullverif
+ln -s $OUT_DIR /tmp/fullverif
 
 VCD_PATH=$OUT_DIR/a.vcd
 SIM_PATH=$OUT_DIR/a.out
@@ -56,6 +59,7 @@ echo "Starting simulation..."
 # -y source directory for .v modules
 # -s top-level module (i.e. testbench)
 # -D define VCD_PATH so that the testbench can write the vcd in the correct location
+echo simulation command $IV -y $SIMU_DIR -y $FULLVERIF_LIB_DIR -I $SIMU_DIR -I $FULLVERIF_LIB_DIR -s $TB_MODULE -o $SIM_PATH -D VCD_PATH=\"$VCD_PATH\" $SYNTH_BASE.v $TB_PATH || exit
 $IV -y $SIMU_DIR -y $FULLVERIF_LIB_DIR -I $SIMU_DIR -I $FULLVERIF_LIB_DIR -s $TB_MODULE -o $SIM_PATH -D VCD_PATH=\"$VCD_PATH\" $SYNTH_BASE.v $TB_PATH || exit
 $VVP $SIM_PATH
 echo "Simulation finished"
