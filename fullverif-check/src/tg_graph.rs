@@ -7,7 +7,7 @@ use crate::gadgets::{self, Input, Latency, Sharing};
 use crate::netlist::{self, RndLatencies};
 use petgraph::{
     graph::{self, NodeIndex},
-    visit::{EdgeRef, IntoNodeIdentifiers, IntoNodeReferences, Walker},
+    visit::{EdgeRef, IntoNodeIdentifiers, IntoNodeReferences},
     Direction, Graph,
 };
 use std::collections::{BinaryHeap, HashMap, HashSet};
@@ -49,10 +49,13 @@ enum GFNode<'a, 'b> {
 
 impl<'a, 'b> GFNode<'a, 'b> {
     fn is_gadget(&self) -> bool {
-        if let GFNode::Gadget(_) = self {
-            true
+        self.gadget().is_some()
+    }
+    fn gadget(&self) -> Option<&GadgetNode<'a, 'b>> {
+        if let GFNode::Gadget(gn) = self {
+            Some(gn)
         } else {
-            false
+            None
         }
     }
 }
@@ -597,6 +600,7 @@ impl<'a, 'b> AGadgetFlow<'a, 'b> {
     }
     /// Is the gadget n sensitive, that is, is any of the inputs of node n sensitive (in the
     /// glitch or non-glitch domain) ?
+    #[allow(dead_code)]
     pub fn gadget_sensitive(&self, n: NodeIndex) -> bool {
         self.gadget_sensitivity(n) != Sensitive::No
     }
@@ -901,91 +905,92 @@ impl<'a, 'b> AGadgetFlow<'a, 'b> {
             .map(|(_, g)| (g.name, &g.base))
     }
 
-    /// For each gadget instance, list of all other instances of the same structural gadget whose
-    /// inputs depend on the output of the current gadget instance.
-    fn self_reachability(&self) -> HashMap<NodeIndex, Vec<Latency>> {
-        // Algo: simple DFS on the graph, starting from every node
-        self.gadgets()
-            .map(|(id, gadget)| {
-                let mut reachables = petgraph::visit::Dfs::new(&self.gadgets, id)
-                    .iter(&self.gadgets)
-                    .filter_map(|nx| {
-                        if let GFNode::Gadget(gn) = &self.gadgets[nx] {
-                            if gn.name.0 == gadget.name.0 {
-                                Some(gn.name.1)
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
+    fn build_contiguous_seq_gadget(&self, name: GName<'a>) -> Vec<(Latency, Latency)> {
+        let mut last_start = None;
+        let mut lat_iter = (0..self.n_cycles).into_iter();
+        std::iter::from_fn(move || {
+            while let Some(lat) = lat_iter.next() {
+                let n = self.g_nodes[&(name, lat)];
+                match self.gadget_sensitivity(n) {
+                    Sensitive::No => {
+                        if let Some(ls) = last_start {
+                            last_start = None;
+                            return Some((ls, lat - 1));
                         }
-                    })
-                    .collect::<Vec<_>>();
-                reachables.sort_unstable();
-                (id, reachables)
-            })
-            .collect()
+                    }
+                    Sensitive::Glitch => {
+                        if let Some(ls) = last_start {
+                            last_start = None;
+                            return Some((ls, lat));
+                        }
+                    }
+                    Sensitive::Yes => {
+                        if last_start.is_none() {
+                            last_start = Some(lat);
+                        }
+                    }
+                }
+            }
+            if let Some(ls) = last_start {
+                last_start = None;
+                return Some((ls, self.n_cycles - 1));
+            }
+            return None;
+        })
+        .collect()
     }
 
-    fn build_contiguous_seq_gadgets(&self) -> Vec<(GName<'a>, (Latency, Latency))> {
+    fn list_non_affine_gadgets(&self) -> Vec<GName<'a>> {
         self.internals
             .subgadgets
-            .keys()
-            .flat_map(move |name| {
-                let mut last_start = None;
-                let mut lat_iter = (0..self.n_cycles).into_iter();
-                std::iter::from_fn(move || {
-                    while let Some(lat) = lat_iter.next() {
-                        let n = self.g_nodes[&(*name, lat)];
-                        match self.gadget_sensitivity(n) {
-                            Sensitive::No => {
-                                if let Some(ls) = last_start {
-                                    last_start = None;
-                                    return Some((ls, lat - 1));
-                                }
-                            }
-                            Sensitive::Glitch => {
-                                if let Some(ls) = last_start {
-                                    last_start = None;
-                                    return Some((ls, lat));
-                                }
-                            }
-                            Sensitive::Yes => {
-                                if last_start.is_none() {
-                                    last_start = Some(lat);
-                                }
-                            }
-                        }
-                    }
-                    if let Some(ls) = last_start {
-                        last_start = None;
-                        return Some((ls, self.n_cycles - 1));
-                    }
-                    return None;
-                })
-                .map(move |x| (*name, x))
-            })
+            .iter()
+            .filter(|(_, inst)| !inst.kind.prop.is_affine())
+            .map(|(gname, _)| *gname)
             .collect()
     }
 
+    /// For a given structural gadget and an inclusive range [start, end] of latencies,
+    /// try to find a (lat0, lat1) pair such that the instance at latency lat1 has an input that
+    /// depends of an ouput of the instance at latency lat0.
+    fn seq_gadgets_parallel(
+        &self,
+        name: GName<'a>,
+        start: Latency,
+        end: Latency,
+    ) -> Option<(Latency, Latency)> {
+        // gadgets with latency > end cannot reach end.
+        let fgraph = petgraph::visit::NodeFiltered(&self.gadgets, |node_id| {
+            if let GFNode::Gadget(gn) = &self.gadgets[node_id] {
+                gn.name.1 <= end
+            } else {
+                false
+            }
+        });
+        let mut dfs = petgraph::visit::Dfs::empty(&fgraph);
+        for lat in start..end {
+            dfs.move_to(self.g_nodes[&(name, lat)]);
+            while let Some(nx) = dfs.next(&fgraph) {
+                if let Some(fail_lat) = self.gadgets[nx]
+                    .gadget()
+                    .filter(|gn| gn.name.0 == name)
+                    .map(|gn| gn.name.1)
+                    .filter(|l| *l <= end && *l != lat)
+                {
+                    return Some((lat, fail_lat));
+                }
+            }
+        }
+        return None;
+    }
+
+    /// Incomplete list if non-empty !
     fn list_non_parllel_seq_gadgets(&self) -> Vec<(Name<'a>, Latency)> {
-        let reachability = self.self_reachability();
         let mut res = vec![];
-        for (name, (start, end)) in self.build_contiguous_seq_gadgets() {
-            for lat in start..end {
-                let reachables = &reachability[&self.g_nodes[&(name, lat)]];
-                let follower = reachables
-                    .binary_search(&start)
-                    .or_else(|idx| {
-                        if reachables[idx] <= end {
-                            Ok(idx)
-                        } else {
-                            Err(())
-                        }
-                    })
-                    .ok();
-                if let Some(idx) = follower {
-                    res.push(((name, lat), reachables[idx]));
+        for name in self.list_non_affine_gadgets() {
+            for (start, end) in self.build_contiguous_seq_gadget(name) {
+                if let Some((fail_lat_s, fail_lat_e)) = self.seq_gadgets_parallel(name, start, end)
+                {
+                    res.push(((name, fail_lat_s), fail_lat_e));
                 }
             }
         }
@@ -998,7 +1003,7 @@ impl<'a, 'b> AGadgetFlow<'a, 'b> {
                 &self.internals.gadget.module,
                 CompErrorKind::Other(
                     format!(
-                        "Gadget {} is sensitive at all cycles between {} and {} (included), and input of execution {} depends on output of execution {}, which breaks transition-robust security.",
+                        "PINI Gadget {} is sensitive at all cycles between {} and {} (included), and input of execution {} depends on output of execution {}, which breaks transition-robust security.",
                         name.0, name.1, follower, follower, name.1
                     )
                 )
