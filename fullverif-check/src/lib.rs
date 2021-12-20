@@ -101,23 +101,31 @@ fn check_gadget<'a, 'b>(
             gadget_internals.check_sharings()?;
             println!("Sharings preserved: ok.");
 
-            let n_cycles = controls.len() as gadgets::Latency;
+            let n_simu_cycles = controls.len() as gadgets::Latency;
             let max_delay_output = gadget.max_output_lat();
-            if (max_delay_output + 1 > n_cycles) && !check_state_cleared {
+            if check_state_cleared {
+                assert!(max_delay_output + 1 < n_simu_cycles);
+            } else if max_delay_output + 1 > n_simu_cycles {
                 println!(
-                    "Warning: not enough simulated cycles to simulate gadget {}.\nThis indicates \
-                     that computation of this gadget is late with respect to the output shares.",
+                    "Error: not enough simulated cycles to simulate gadget {}.\nThis indicates \
+                     that computation of this gadget is late with respect to the output shares. \
+                     Skipping verification of this gadget.",
                     gadget_name
                 );
                 return Ok(None);
             }
-            // This should have been checked before if check_state_cleared == true
-            assert!(!(max_delay_output + 1 >= n_cycles && check_state_cleared));
-            let n_cycles = std::cmp::min(n_cycles, max_delay_output + 2);
-            println!("final n_cycles: {}", n_cycles);
+            let n_analysis_cycles = if check_state_cleared {
+                max_delay_output + 2
+            } else {
+                max_delay_output + 1
+            };
+            println!(
+                "Analyzing execution of the gadget over {} cycles (based on output latencies).",
+                n_analysis_cycles
+            );
             println!("Loaded simulation states.");
             println!("to graph...");
-            let graph = tg_graph::BGadgetFlow::unroll(gadget_internals.clone(), n_cycles)?;
+            let graph = tg_graph::BGadgetFlow::unroll(gadget_internals.clone(), n_analysis_cycles)?;
             let _a_graph = graph.annotate(controls)?;
             println!("annotation done");
             if false {
