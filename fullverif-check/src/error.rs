@@ -77,7 +77,7 @@ pub enum CompErrorKind<'a> {
     WrongWireWidth(u32, u32),
     NoOutput,
     EarlyOutput,
-    LateOutput(Latency, String, gadgets::Sharing<'a>),
+    LateOutput(Latency, Latency, Latency, String, gadgets::Sharing<'a>),
     BadShareUse(Connection<'a>, String, String, usize),
     InvalidRandom(
         Vec<tg_graph::TRndConnection<'a>>,
@@ -297,11 +297,13 @@ impl<'a> fmt::Display for CompError<'a> {
                     "Gadget has valid output sharing before last input sharing or random.",
                 )?;
             }
-            CompErrorKind::LateOutput(lateness, sg, output) => {
+            CompErrorKind::LateOutput(max_out_lat, gadget_lat, out_lat, sg, output) => {
                 writeln!(
                     f,
-                    "Output {} of subgadget {} is too late by {} cycle(s).",
-                    output, sg, lateness
+                    "Output {} of subgadget {} is too late by {} cycle(s). The subgadget execution at cycle {} has sensitive inputs and its latest output has latency {}, giving a total latency of {}, which is larger than the high output latency of the current gadget ({}).",
+                    output, sg, 
+                    gadget_lat + out_lat - max_out_lat,
+                    gadget_lat, out_lat, gadget_lat+out_lat, max_out_lat
                 )?;
                 writeln!(f, "The security of late computations cannot be checked.")?;
             }

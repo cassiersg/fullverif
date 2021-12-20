@@ -865,17 +865,20 @@ impl<'a, 'b> AGadgetFlow<'a, 'b> {
 
     /// Verifies that there is no any more sensitive state in the circuit after n_cycles.
     pub fn check_state_cleared(&self) -> CResult<'a, ()> {
+        let max_out_lat = self.internals.gadget.max_output_lat();
         let errors = self
             .gadgets()
             .filter(|(idx, _)| self.gadget_sensitive_stable(*idx)) // ok: we don't care about glitches
             .flat_map(|(idx, gadget)| {
                 self.g_outputs(idx).filter_map(move |e| {
                     let out_lat = gadget.base.kind.outputs[&e.weight().edge.output];
-                    if gadget.name.1 + out_lat > self.n_cycles - 1 {
+                    if gadget.name.1 + out_lat > max_out_lat {
                         Some(CompError::ref_nw(
                             &self.internals.gadget.module,
                             CompErrorKind::LateOutput(
-                                gadget.name.1 + out_lat - self.n_cycles + 1,
+                                max_out_lat,
+                                gadget.name.1,
+                                out_lat,
                                 (*gadget.name.0.get()).to_owned(),
                                 e.weight().edge.output,
                             ),
