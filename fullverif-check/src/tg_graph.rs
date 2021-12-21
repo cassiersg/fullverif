@@ -6,7 +6,7 @@ use crate::gadget_internals::{self, Connection, GName, RndConnection};
 use crate::gadgets::{self, Input, Latency, Sharing};
 use crate::netlist::{self, RndLatencies};
 use petgraph::{
-    graph::{self, NodeIndex},
+    graph::{self, EdgeReference, NodeIndex},
     visit::{EdgeRef, IntoNodeIdentifiers},
     Direction, Graph,
 };
@@ -78,34 +78,23 @@ pub struct Edge<'a> {
     input: Input<'a>,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-/// An edge in the annotated FlowGraph
-pub struct AEdge<'a> {
-    edge: Edge<'a>,
-    valid: bool,
-    sensitive: Sensitive,
-}
-
 /// A GadgetGraph
-type GGraph<'a, 'b, E> = Graph<GFNode<'a, 'b>, E>;
+#[derive(derive_more::Deref, derive_more::DerefMut)]
+struct GGraph<'a, 'b>(Graph<GFNode<'a, 'b>, Edge<'a>>);
 
 /// Data flow graph for gadget.
 /// Built by repeating the GadgetInternals in the time dimension,
 /// and connecting gadgets according to latency annotations.
-pub struct GadgetFlow<'a, 'b, E> {
+pub struct GadgetFlow<'a, 'b> {
     pub internals: gadget_internals::GadgetInternals<'a, 'b>,
-    ggraph: GGraph<'a, 'b, E>,
+    ggraph: GGraph<'a, 'b>,
     g_nodes: HashMap<Name<'a>, NodeIndex>,
     n_cycles: Latency,
     o_node: petgraph::graph::NodeIndex,
     muxes_ctrls: HashMap<NodeIndex, Option<bool>>,
+    edge_validity: Vec<bool>,
+    edge_sensitivity: Vec<Sensitive>,
 }
-
-/// Non-annocated GadgetFlow.
-pub type BGadgetFlow<'a, 'b> = GadgetFlow<'a, 'b, Edge<'a>>;
-
-/// Annotated GadgetFlow: validity and sensitivity information is included in each edge.
-pub type AGadgetFlow<'a, 'b> = GadgetFlow<'a, 'b, AEdge<'a>>;
 
 const EMPTY_SHARING: Sharing = Sharing {
     port_name: "",
@@ -149,50 +138,53 @@ where
     return Ok(res);
 }
 
-impl<'a, 'b, E> GadgetFlow<'a, 'b, E> {
+impl<'a, 'b> GGraph<'a, 'b> {
     /// Iterator of all the gadgets in the graph.
     fn gadgets<'s>(&'s self) -> impl Iterator<Item = (NodeIndex, &'s GadgetNode<'a, 'b>)> + 's {
-        gadget_iter(&self.ggraph)
+        self.node_identifiers().filter_map(move |idx| {
+            if let &GFNode::Gadget(ref gadget) = &self[idx] {
+                Some((idx, gadget))
+            } else {
+                None
+            }
+        })
     }
-
     /// Iterator on the input edges of gadget.
-    fn g_inputs(&self, gadget: NodeIndex) -> graph::Edges<E, petgraph::Directed> {
-        self.ggraph.edges_directed(gadget, Direction::Incoming)
+    fn g_inputs(&self, gadget: NodeIndex) -> graph::Edges<Edge<'a>, petgraph::Directed> {
+        self.edges_directed(gadget, Direction::Incoming)
     }
 
     /// Iterator on the output edges of gadget.
-    fn g_outputs(&self, gadget: NodeIndex) -> graph::Edges<E, petgraph::Directed> {
-        self.ggraph.edges_directed(gadget, Direction::Outgoing)
-    }
-
-    /// Iterator of the ids of the gadgets in the graph.
-    pub fn gadget_names<'s>(&'s self) -> impl Iterator<Item = Name<'a>> + 's {
-        self.gadgets().map(|(_, g)| g.name)
+    fn g_outputs(&self, gadget: NodeIndex) -> graph::Edges<Edge<'a>, petgraph::Directed> {
+        self.edges_directed(gadget, Direction::Outgoing)
     }
 
     /// Get the gadget with the given node index. (Panics on error.)
     fn gadget(&self, idx: NodeIndex) -> &GadgetNode<'a, 'b> {
-        if let GFNode::Gadget(ref gadget) = &self.ggraph[idx] {
+        if let GFNode::Gadget(ref gadget) = &self[idx] {
             gadget
         } else {
             panic!("Gadget at index {:?} is not a gadget.", idx)
         }
     }
-}
 
-impl<'a, 'b, E: std::fmt::Debug> GadgetFlow<'a, 'b, E> {
     /// Show an edge
-    fn disp_edge(&self, e: petgraph::graph::EdgeReference<E>) -> String {
+    fn disp_edge(&self, e: petgraph::graph::EdgeReference<Edge<'a>>) -> String {
         format!(
             "from {:?} to {:?}, {:?}",
-            self.ggraph[e.source()],
-            self.ggraph[e.target()],
+            self[e.source()],
+            self[e.target()],
             e.weight()
         )
     }
 }
 
-impl<'a, 'b> BGadgetFlow<'a, 'b> {
+impl<'a, 'b> GadgetFlow<'a, 'b> {
+    /// Iterator of the ids of the gadgets in the graph.
+    pub fn gadget_names<'s>(&'s self) -> impl Iterator<Item = Name<'a>> + 's {
+        self.ggraph.gadgets().map(|(_, g)| g.name)
+    }
+
     fn build_graph(
         ggraph: &mut Graph<GFNode<'a, 'b>, Edge<'a>>,
         internals: &gadget_internals::GadgetInternals<'a, 'b>,
@@ -288,14 +280,18 @@ impl<'a, 'b> BGadgetFlow<'a, 'b> {
 
     /// Build (non-annotated) a GadgetFlow graph from the GadgetInternals, for n_cycles execution
     /// cycles.
-    pub fn unroll(
+    pub fn new(
         internals: gadget_internals::GadgetInternals<'a, 'b>,
         n_cycles: Latency,
         controls: &mut clk_vcd::ModuleControls,
     ) -> CResult<'a, Self> {
         let mut ggraph = Graph::new();
         let (g_nodes, o_node) = Self::build_graph(&mut ggraph, &internals, n_cycles)?;
-        let muxes_ctrls = mux_ctrls(gadget_iter(&ggraph), controls)?;
+        let ggraph = GGraph(ggraph);
+        let muxes_ctrls = mux_ctrls(ggraph.gadgets(), controls)?;
+        let sorted_nodes = Self::toposort(&ggraph, &internals, &muxes_ctrls)?;
+        let (edge_validity, edge_sensitivity) =
+            Self::annotate(&ggraph, &internals, &muxes_ctrls, &sorted_nodes)?;
         let res = Self {
             internals,
             ggraph,
@@ -303,6 +299,8 @@ impl<'a, 'b> BGadgetFlow<'a, 'b> {
             n_cycles,
             o_node,
             muxes_ctrls,
+            edge_validity,
+            edge_sensitivity,
         };
         return Ok(res);
     }
@@ -310,39 +308,44 @@ impl<'a, 'b> BGadgetFlow<'a, 'b> {
     /// Sort the nodes in the graph, inputs first.
     /// Does not take into account the non-selected edge of a mux for the ordering.
     /// Err if there is a cycle in the graph.
-    fn toposort(&self) -> CResult<'a, Vec<NodeIndex>> {
-        let ggraph = petgraph::visit::EdgeFiltered::from_fn(&self.ggraph, |edge_ref| {
+    fn toposort(
+        ggraph: &GGraph<'a, 'b>,
+        internals: &gadget_internals::GadgetInternals<'a, 'b>,
+        muxes_ctrls: &HashMap<NodeIndex, Option<bool>>,
+    ) -> CResult<'a, Vec<NodeIndex>> {
+        let fggraph = petgraph::visit::EdgeFiltered::from_fn(&ggraph.0, |edge_ref| {
             match (
-                self.muxes_ctrls.get(&edge_ref.target()),
+                muxes_ctrls.get(&edge_ref.target()),
                 edge_ref.weight().input.0.port_name,
             ) {
                 (Some(Some(true)), "in_false") | (Some(Some(false)), "in_true") => false,
                 _ => true,
             }
         });
-        Ok(petgraph::algo::toposort(&ggraph, None).map_err(|cycle| {
+        Ok(petgraph::algo::toposort(&fggraph, None).map_err(|cycle| {
             CompError::ref_nw(
-                &self.internals.gadget.module,
+                &internals.gadget.module,
                 CompErrorKind::Other(format!(
                     "Looping data depdendency containing gadget {:?}",
-                    self.ggraph[cycle.node_id()]
+                    ggraph[cycle.node_id()]
                 )),
             )
         })?)
     }
 
     /// Compute validity and sensitivity information for each edge.
-    fn annotate_inner(
-        &self,
+    fn annotate(
+        ggraph: &GGraph<'a, 'b>,
+        internals: &gadget_internals::GadgetInternals<'a, 'b>,
         muxes_ctrls: &HashMap<NodeIndex, Option<bool>>,
         sorted_nodes: &[NodeIndex],
     ) -> Result<(Vec<bool>, Vec<Sensitive>), CompError<'a>> {
-        let mut edges_valid: Vec<Option<bool>> = vec![None; self.ggraph.edge_count()];
-        let mut edges_sensitive: Vec<Option<Sensitive>> = vec![None; self.ggraph.edge_count()];
+        let mut edges_valid: Vec<Option<bool>> = vec![None; ggraph.edge_count()];
+        let mut edges_sensitive: Vec<Option<Sensitive>> = vec![None; ggraph.edge_count()];
         for idx in sorted_nodes.into_iter() {
-            match &self.ggraph[*idx] {
+            match &ggraph[*idx] {
                 GFNode::Gadget(_) => {
-                    let max_output = self.g_outputs(*idx).map(|e| e.weight().output.pos).max();
+                    let max_output = ggraph.g_outputs(*idx).map(|e| e.weight().output.pos).max();
                     if let (Some(ctrl), Some(max_output)) = (muxes_ctrls.get(idx), max_output) {
                         //let mut outputs: Vec<bool> = vec![false; max_output as usize + 1];
                         let mut outputs_valid: Vec<Option<bool>> =
@@ -351,7 +354,7 @@ impl<'a, 'b> BGadgetFlow<'a, 'b> {
                             vec![None; max_output as usize + 1];
                         if let Some(ctrl) = ctrl {
                             let input = if *ctrl { "in_true" } else { "in_false" };
-                            for e_i in self.g_inputs(*idx) {
+                            for e_i in ggraph.g_inputs(*idx) {
                                 let Sharing { port_name, pos } = &e_i.weight().input.0;
                                 if port_name == &input {
                                     outputs_valid[*pos as usize] = edges_valid[e_i.id().index()];
@@ -361,16 +364,16 @@ impl<'a, 'b> BGadgetFlow<'a, 'b> {
                                 }
                             }
                         } else {
-                            for e_i in self.g_inputs(*idx) {
+                            for e_i in ggraph.g_inputs(*idx) {
                                 let Sharing { pos, .. } = &e_i.weight().input.0;
                                 if *pos > max_output {
                                     panic!(
                                         "pos: {}, max_output (): {}, name: {:?}, base: {:?}\noutputs:{:?}",
                                         *pos,
                                         max_output,
-                                        self.ggraph[*idx],
-                                        self.gadget(*idx).base.kind,
-                                        self.g_outputs(*idx).collect::<Vec<_>>()
+                                        ggraph[*idx],
+                                        ggraph.gadget(*idx).base.kind,
+                                        ggraph.g_outputs(*idx).collect::<Vec<_>>()
                                     );
                                 }
                                 outputs_valid[*pos as usize] = Some(false);
@@ -380,22 +383,22 @@ impl<'a, 'b> BGadgetFlow<'a, 'b> {
                                 *sens = (*sens).max(sens_new);
                             }
                         }
-                        for o_e in self.g_outputs(*idx) {
+                        for o_e in ggraph.g_outputs(*idx) {
                             let pos = o_e.weight().output.pos as usize;
                             edges_valid[o_e.id().index()] = outputs_valid[pos];
                             edges_sensitive[o_e.id().index()] = outputs_sensitive[pos];
                         }
                     } else {
-                        let g_valid = self.g_inputs(*idx).all(|e| {
+                        let g_valid = ggraph.g_inputs(*idx).all(|e| {
                             edges_valid[e.id().index()].unwrap_or_else(|| {
                                 panic!(
                                 "Non-initialized validity for edge {}, src node pos: {:?}, target node pos: {:?}",
-                                self.disp_edge(e),
+                                ggraph.disp_edge(e),
                                 sorted_nodes.iter().find(|x| **x== e.source()),
                                 sorted_nodes.iter().find(|x| **x == e.target()),
                             );})
                         });
-                        let g_sensitive = self
+                        let g_sensitive = ggraph
                             .g_inputs(*idx)
                             .map(|e| {
                                 edges_sensitive[e.id().index()]
@@ -403,16 +406,16 @@ impl<'a, 'b> BGadgetFlow<'a, 'b> {
                             })
                             .max()
                             .unwrap_or(Sensitive::No);
-                        for e in self.g_outputs(*idx) {
+                        for e in ggraph.g_outputs(*idx) {
                             edges_valid[e.id().index()] = Some(g_valid);
                             edges_sensitive[e.id().index()] = Some(g_sensitive);
                         }
                     }
                 }
                 GFNode::Input(lat) => {
-                    for e in self.g_outputs(*idx) {
+                    for e in ggraph.g_outputs(*idx) {
                         let Edge { output, .. } = e.weight();
-                        let valid = self.internals.gadget.inputs[output].contains(&lat);
+                        let valid = internals.gadget.inputs[output].contains(&lat);
                         edges_valid[e.id().index()] = Some(valid);
                         // Worst-case analysis: we assume there may be glitches on the inputs.
                         edges_sensitive[e.id().index()] = if valid {
@@ -423,27 +426,27 @@ impl<'a, 'b> BGadgetFlow<'a, 'b> {
                     }
                 }
                 GFNode::Output => {
-                    assert!(self.g_outputs(*idx).next().is_none());
+                    assert!(ggraph.g_outputs(*idx).next().is_none());
                 }
                 GFNode::Invalid => {
                     // Connections from non-existing gadgets or out of range inputs.
                     // Assume that they are non-sensitive (might want to assume glitch ?)
-                    for e in self.g_outputs(*idx) {
+                    for e in ggraph.g_outputs(*idx) {
                         edges_valid[e.id().index()] = Some(false);
                         edges_sensitive[e.id().index()] = Some(Sensitive::No);
                     }
                 }
             }
-            for e in self.g_outputs(*idx) {
+            for e in ggraph.g_outputs(*idx) {
                 assert!(
                     edges_valid[e.id().index()].is_some(),
                     "Failed init valid for edge {}",
-                    self.disp_edge(e)
+                    ggraph.disp_edge(e)
                 );
                 assert!(
                     edges_sensitive[e.id().index()].is_some(),
                     "Failed init sensitive for edge {}",
-                    self.disp_edge(e)
+                    ggraph.disp_edge(e)
                 );
             }
         }
@@ -454,18 +457,19 @@ impl<'a, 'b> BGadgetFlow<'a, 'b> {
             .collect::<Vec<Sensitive>>();
         // Propagate glitches
         // Stack of gadgets on which to propagate glitches
-        let mut gl_to_analyze = self.gadgets().map(|x| x.0).collect::<BinaryHeap<_>>();
+        let mut gl_to_analyze = ggraph.gadgets().map(|x| x.0).collect::<BinaryHeap<_>>();
         while let Some(idx) = gl_to_analyze.pop() {
             let noglitch_cycle = compute_sensitivity(
-                self.g_inputs(idx)
+                ggraph
+                    .g_inputs(idx)
                     .map(|e| (edges_sensitive[e.id().index()], e.weight().input)),
             );
             if noglitch_cycle == 0 {
                 continue;
             }
-            for e in self.g_outputs(idx) {
+            for e in ggraph.g_outputs(idx) {
                 if edges_sensitive[e.id().index()] == Sensitive::No {
-                    let output_lat = *self
+                    let output_lat = *ggraph
                         .gadget(idx)
                         .base
                         .kind
@@ -474,7 +478,7 @@ impl<'a, 'b> BGadgetFlow<'a, 'b> {
                         .unwrap();
                     if output_lat < noglitch_cycle {
                         edges_sensitive[e.id().index()] = Sensitive::Glitch;
-                        if self.ggraph[e.target()].is_gadget() {
+                        if ggraph[e.target()].is_gadget() {
                             gl_to_analyze.push(e.target());
                         }
                     }
@@ -487,87 +491,27 @@ impl<'a, 'b> BGadgetFlow<'a, 'b> {
         ))
     }
 
-    /// Compute validity and sensitivity information. Build an annotated GadgetFlow.
-    pub fn annotate(&self) -> CResult<'a, AGadgetFlow<'a, 'b>> {
-        let sorted_nodes = self.toposort()?;
-        let (validities, sensitivities) = self.annotate_inner(&self.muxes_ctrls, &sorted_nodes)?;
-        let new_ggraph = self.ggraph.map(
-            |_, n| n.clone(),
-            |i, e| AEdge {
-                edge: e.clone(),
-                valid: validities[i.index()],
-                sensitive: sensitivities[i.index()],
-            },
-        );
-        Ok(AGadgetFlow {
-            ggraph: new_ggraph,
-            g_nodes: self.g_nodes.clone(),
-            internals: self.internals.clone(),
-            n_cycles: self.n_cycles,
-            o_node: self.o_node,
-            muxes_ctrls: self.muxes_ctrls.clone(),
-        })
+    fn edge_valid(&self, e: EdgeReference<Edge<'a>>) -> bool {
+        self.edge_validity[e.id().index()]
     }
-}
 
-pub fn is_rnd_valid<'a>(
-    gadget: &gadgets::Gadget<'a>,
-    rnd: &gadgets::Random<'a>,
-    lat: Latency,
-    controls: &mut clk_vcd::ModuleControls,
-) -> Result<bool, CompError<'a>> {
-    match &gadget.randoms[rnd] {
-        Some(RndLatencies::Attr(lats)) => Ok(lats.contains(&lat)),
-        Some(RndLatencies::Wire { wire_name, offset }) => {
-            let cycle = <u32 as std::convert::TryFrom<i32>>::try_from((lat as i32) + offset)
-                .map_err(|_| {
-                    CompError::other(
-                        &gadget.module,
-                        rnd.port_name,
-                        &format!(
-                            "For random at cycle {}, control signal cycle is negative (offset: {})",
-                            lat, offset
-                        ),
-                    )
-                })?;
-            let valid = controls
-                .lookup(vec![wire_name.clone()], cycle as usize, 0)?
-                .and_then(|var_state| var_state.to_bool())
-                .ok_or_else(|| {
-                    CompError::other(
-                        &gadget.module,
-                        rnd.port_name,
-                        &format!(
-                            "Valid-indicating wire has no value at cycle {} (for rnd at cycle {})",
-                            cycle, lat
-                        ),
-                    )
-                })?;
-            Ok(valid)
-        }
-        None => Err(CompError::ref_sn(
-            &gadget.module,
-            rnd.port_name,
-            CompErrorKind::Other(
-                "Sub-gadget randomness inputs must be annotated with the 'fv_latency' attribute"
-                    .to_string(),
-            ),
-        )),
+    fn edge_sensitive(&self, e: EdgeReference<Edge<'a>>) -> Sensitive {
+        self.edge_sensitivity[e.id().index()]
     }
-}
 
-impl<'a, 'b> AGadgetFlow<'a, 'b> {
     /// Is the gadget n valid, that is, are all the inputs of node n valid ?
     fn gadget_valid(&self, n: NodeIndex) -> bool {
-        self.g_inputs(n).all(|e| e.weight().valid)
+        self.ggraph.g_inputs(n).all(|e| self.edge_valid(e))
     }
 
     fn gadget_sensitivity(&self, n: NodeIndex) -> Sensitive {
-        self.g_inputs(n)
-            .map(|e| e.weight().sensitive)
+        self.ggraph
+            .g_inputs(n)
+            .map(|e| self.edge_sensitive(e))
             .max()
             .unwrap_or(Sensitive::No)
     }
+
     /// Is the gadget n sensitive, that is, is any of the inputs of node n sensitive (in the
     /// glitch or non-glitch domain) ?
     pub fn gadget_sensitive(&self, n: NodeIndex) -> bool {
@@ -583,7 +527,7 @@ impl<'a, 'b> AGadgetFlow<'a, 'b> {
     /// List the latencies at which each gadget is valid.
     pub fn list_valid(&self) -> HashMap<GName<'a>, Vec<Latency>> {
         let mut gadgets = HashMap::new();
-        for (id, gadget) in self.gadgets() {
+        for (id, gadget) in self.ggraph.gadgets() {
             if gadget.base.kind.prop != netlist::GadgetProp::Mux {
                 if self.gadget_valid(id) {
                     gadgets
@@ -604,7 +548,7 @@ impl<'a, 'b> AGadgetFlow<'a, 'b> {
     /// List the latencies at which each gadget is sensitive.
     pub fn list_sensitive(&self, sensitivity: Sensitive) -> HashMap<GName<'a>, Vec<Latency>> {
         let mut gadgets = HashMap::new();
-        for (id, gadget) in self.gadgets() {
+        for (id, gadget) in self.ggraph.gadgets() {
             if gadget.base.kind.prop != netlist::GadgetProp::Mux
                 && self.gadget_sensitivity(id) == sensitivity
             {
@@ -622,7 +566,8 @@ impl<'a, 'b> AGadgetFlow<'a, 'b> {
 
     /// Returns the list of gadgets that are sensitive, not valid, and have randomness inputs.
     pub fn warn_useless_rnd(&self) -> Vec<Name<'a>> {
-        self.gadgets()
+        self.ggraph
+            .gadgets()
             .filter(|(idx, gadget)| {
                 !gadget.random_connections.is_empty()
                     && self.gadget_sensitive(*idx)
@@ -634,29 +579,28 @@ impl<'a, 'b> AGadgetFlow<'a, 'b> {
 
     /// Display a full representation of the annotated GadgetFlow
     pub fn disp_full(&self) {
-        for (id, gadget) in self.gadgets() {
+        for (id, gadget) in self.ggraph.gadgets() {
             println!("Gadget {:?}:", gadget.name);
             println!("Inputs:");
-            for e in self.g_inputs(id) {
-                let AEdge {
-                    edge: Edge { input, .. },
-                    valid,
-                    sensitive,
-                } = e.weight();
+            for e in self.ggraph.g_inputs(id) {
+                let input = e.weight().input;
                 println!(
                     "\tinput ({}[{}], {}): Valid: {:?}, Sensitive: {:?}",
-                    input.0.port_name, input.0.pos, input.1, valid, sensitive
+                    input.0.port_name,
+                    input.0.pos,
+                    input.1,
+                    self.edge_valid(e),
+                    self.edge_sensitive(e)
                 );
             }
-            for e in self.g_outputs(id) {
-                let AEdge {
-                    edge: Edge { output, .. },
-                    valid,
-                    sensitive,
-                } = e.weight();
+            for e in self.ggraph.g_outputs(id) {
+                let output = e.weight().output;
                 println!(
                     "\toutput {}[{}]: Valid: {:?}, Sensitive: {:?}",
-                    output.port_name, output.pos, valid, sensitive
+                    output.port_name,
+                    output.pos,
+                    self.edge_valid(e),
+                    self.edge_sensitive(e)
                 );
             }
         }
@@ -665,10 +609,11 @@ impl<'a, 'b> AGadgetFlow<'a, 'b> {
     /// Checks that all the inputs are valid when the should be valid according to specification.
     pub fn check_valid_outputs(&self) -> CResult<'a, ()> {
         let valid_outputs = self
+            .ggraph
             .g_inputs(self.o_node)
             .filter_map(|e| {
-                if e.weight().valid {
-                    Some(e.weight().edge.input)
+                if self.edge_valid(e) {
+                    Some(e.weight().input)
                 } else {
                     None
                 }
@@ -689,12 +634,13 @@ impl<'a, 'b> AGadgetFlow<'a, 'b> {
             ))?;
         }
         let excedentary_outputs = self
+            .ggraph
             .g_inputs(self.o_node)
             .filter_map(|e| {
                 // We don't care about glitches, those are inferred and always assumed by the
                 // outside world.
-                if e.weight().sensitive == Sensitive::Yes {
-                    let (sh, lat) = e.weight().edge.input;
+                if self.edge_sensitive(e) == Sensitive::Yes {
+                    let (sh, lat) = e.weight().input;
                     if self.internals.gadget.outputs.get(&sh).map(|l| *l == lat) != Some(true) {
                         return Some((sh, lat));
                     }
@@ -722,7 +668,7 @@ impl<'a, 'b> AGadgetFlow<'a, 'b> {
         let mut errors: Vec<CompError<'a>> = Vec::new();
         println!("starting randoms_input_timing");
         let mut i = 0;
-        for (idx, gadget) in self.gadgets() {
+        for (idx, gadget) in self.ggraph.gadgets() {
             for conn in gadget.random_connections.keys() {
                 i += 1;
                 let rnd_in =
@@ -759,7 +705,7 @@ impl<'a, 'b> AGadgetFlow<'a, 'b> {
                     let random_uses = uses
                         .iter()
                         .map(|(idx, rnd)| {
-                            let gadget = self.gadget(*idx);
+                            let gadget = self.ggraph.gadget(*idx);
                             (
                                 (gadget.name, rnd.clone()),
                                 random_to_input(
@@ -785,7 +731,7 @@ impl<'a, 'b> AGadgetFlow<'a, 'b> {
                         break;
                     }
                 } else {
-                    let GadgetNode { name, .. } = self.gadget(uses[0].0);
+                    let GadgetNode { name, .. } = self.ggraph.gadget(uses[0].0);
                     res.insert(*in_rnd, (*name, uses[0].1));
                 }
             }
@@ -837,11 +783,12 @@ impl<'a, 'b> AGadgetFlow<'a, 'b> {
     pub fn check_state_cleared(&self) -> CResult<'a, ()> {
         let max_out_lat = self.internals.gadget.max_output_lat();
         let errors = self
+            .ggraph
             .gadgets()
             .filter(|(idx, _)| self.gadget_sensitive_stable(*idx)) // ok: we don't care about glitches
             .flat_map(|(idx, gadget)| {
-                self.g_outputs(idx).filter_map(move |e| {
-                    let out_lat = gadget.base.kind.outputs[&e.weight().edge.output];
+                self.ggraph.g_outputs(idx).filter_map(move |e| {
+                    let out_lat = gadget.base.kind.outputs[&e.weight().output];
                     if gadget.name.1 + out_lat > max_out_lat {
                         Some(CompError::ref_nw(
                             &self.internals.gadget.module,
@@ -850,7 +797,7 @@ impl<'a, 'b> AGadgetFlow<'a, 'b> {
                                 gadget.name.1,
                                 out_lat,
                                 (*gadget.name.0.get()).to_owned(),
-                                e.weight().edge.output,
+                                e.weight().output,
                             ),
                         ))
                     } else {
@@ -866,7 +813,8 @@ impl<'a, 'b> AGadgetFlow<'a, 'b> {
     pub fn sensitive_stable_gadgets<'s>(
         &'s self,
     ) -> impl Iterator<Item = (Name<'a>, &'s gadget_internals::GadgetInstance<'a, 'b>)> + 's {
-        self.gadgets()
+        self.ggraph
+            .gadgets()
             .filter(move |(idx, _)| self.gadget_sensitive_stable(*idx))
             .map(|(_, g)| (g.name, &g.base))
     }
@@ -925,7 +873,7 @@ impl<'a, 'b> AGadgetFlow<'a, 'b> {
         end: Latency,
     ) -> Option<(Latency, Latency)> {
         // gadgets with latency > end cannot reach end.
-        let fgraph = petgraph::visit::NodeFiltered(&self.ggraph, |node_id| {
+        let fgraph = petgraph::visit::NodeFiltered(&self.ggraph.0, |node_id| {
             if let GFNode::Gadget(gn) = &self.ggraph[node_id] {
                 gn.name.1 <= end
             } else {
@@ -933,6 +881,7 @@ impl<'a, 'b> AGadgetFlow<'a, 'b> {
             }
         });
         // WIP
+        //let fgraph = petgraph::visit::EdgeFiltered::from_fn(&self.ggraph, |edge_ref| { });
         let mut dfs = petgraph::visit::Dfs::empty(&fgraph);
         for lat in start..end {
             dfs.move_to(self.g_nodes[&(name, lat)]);
@@ -977,6 +926,52 @@ impl<'a, 'b> AGadgetFlow<'a, 'b> {
             )
         }).collect::<Vec<_>>();
         CompErrors::result(errors)
+    }
+}
+
+pub fn is_rnd_valid<'a>(
+    gadget: &gadgets::Gadget<'a>,
+    rnd: &gadgets::Random<'a>,
+    lat: Latency,
+    controls: &mut clk_vcd::ModuleControls,
+) -> Result<bool, CompError<'a>> {
+    match &gadget.randoms[rnd] {
+        Some(RndLatencies::Attr(lats)) => Ok(lats.contains(&lat)),
+        Some(RndLatencies::Wire { wire_name, offset }) => {
+            let cycle = <u32 as std::convert::TryFrom<i32>>::try_from((lat as i32) + offset)
+                .map_err(|_| {
+                    CompError::other(
+                        &gadget.module,
+                        rnd.port_name,
+                        &format!(
+                            "For random at cycle {}, control signal cycle is negative (offset: {})",
+                            lat, offset
+                        ),
+                    )
+                })?;
+            let valid = controls
+                .lookup(vec![wire_name.clone()], cycle as usize, 0)?
+                .and_then(|var_state| var_state.to_bool())
+                .ok_or_else(|| {
+                    CompError::other(
+                        &gadget.module,
+                        rnd.port_name,
+                        &format!(
+                            "Valid-indicating wire has no value at cycle {} (for rnd at cycle {})",
+                            cycle, lat
+                        ),
+                    )
+                })?;
+            Ok(valid)
+        }
+        None => Err(CompError::ref_sn(
+            &gadget.module,
+            rnd.port_name,
+            CompErrorKind::Other(
+                "Sub-gadget randomness inputs must be annotated with the 'fv_latency' attribute"
+                    .to_string(),
+            ),
+        )),
     }
 }
 
@@ -1082,19 +1077,6 @@ fn random_connections<'a, 'b>(
         }
     }
     Ok(res)
-}
-
-/// Iterator of all the gadgets in the graph.
-fn gadget_iter<'a, 'b, 's, E>(
-    ggraph: &'s GGraph<'a, 'b, E>,
-) -> impl Iterator<Item = (NodeIndex, &'s GadgetNode<'a, 'b>)> + 's {
-    ggraph.node_identifiers().filter_map(move |idx| {
-        if let &GFNode::Gadget(ref gadget) = &ggraph[idx] {
-            Some((idx, gadget))
-        } else {
-            None
-        }
-    })
 }
 
 /// Find the source GadgetFlow node for a Connection at the given cycle.

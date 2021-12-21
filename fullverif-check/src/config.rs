@@ -13,6 +13,7 @@ pub struct Config {
     pub clk: String,
     pub check_state_cleared: bool,
     pub check_transitions: bool,
+    pub verbose: bool,
 }
 
 pub fn parse_cmd_line() -> Config {
@@ -83,6 +84,13 @@ pub fn parse_cmd_line() -> Config {
                 .help("Skip verification that the circuit is transition-robust.")
                 .takes_value(false),
         )
+        .arg(
+            Arg::with_name("verbose")
+                .long("verbose")
+                .short("v")
+                .help("Print more output.")
+                .takes_value(false),
+        )
         .get_matches();
     let json = matches.value_of("json").unwrap().to_owned();
     let vcd = matches.value_of("vcd").unwrap().to_owned();
@@ -93,6 +101,7 @@ pub fn parse_cmd_line() -> Config {
     let clk = matches.value_of("clock").unwrap().to_owned();
     let check_state_cleared = !matches.is_present("no_check_state_cleared");
     let check_transitions = !matches.is_present("no_check_transitions");
+    let verbose = matches.is_present("verbose");
     Config {
         json,
         vcd,
@@ -103,5 +112,6 @@ pub fn parse_cmd_line() -> Config {
         clk,
         check_state_cleared,
         check_transitions,
+        verbose,
     }
 }

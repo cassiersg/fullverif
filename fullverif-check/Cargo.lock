@@ -62,13 +62,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "convert_case"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e"
+
+[[package]]
 name = "derivative"
-version = "1.0.3"
-source = "git+https://github.com/mcarton/rust-derivative#5ae882d987665bdb29105d8663ca17a70446950b"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fcc3dd5e9e9c0b295d6e1e4d811fb6f157d5ffd784b8d202fc62eac8035a770b"
 dependencies = [
- "proc-macro2 0.4.30",
- "quote 0.6.13",
- "syn 0.15.44",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "derive_more"
+version = "0.99.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4fb810d30a7c1953f91334de7244731fc3f3c10d7fe163338a35b9f640960321"
+dependencies = [
+ "convert_case",
+ "proc-macro2",
+ "quote",
+ "rustc_version",
+ "syn",
 ]
 
 [[package]]
@@ -102,6 +122,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "derivative",
+ "derive_more",
  "env_logger",
  "itertools",
  "log",
@@ -196,20 +217,11 @@ checksum = "a4e36614e15df8570f9eefecc326fe379c2551366cb20a43105639596e474506"
 
 [[package]]
 name = "proc-macro2"
-version = "0.4.30"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf3d2011ab5c909338f7887f4fc896d35932e29146c12c8d01da6b22a80ba759"
-dependencies = [
- "unicode-xid 0.1.0",
-]
-
-[[package]]
-name = "proc-macro2"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9c9e470a8dc4aeae2dee2f335e8f533e2d4b347e1434e5671afc49b054592f27"
 dependencies = [
- "unicode-xid 0.2.0",
+ "unicode-xid",
 ]
 
 [[package]]
@@ -220,20 +232,11 @@ checksum = "9274b940887ce9addde99c4eee6b5c44cc494b182b97e73dc8ffdcb3397fd3f0"
 
 [[package]]
 name = "quote"
-version = "0.6.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ce23b6b870e8f94f81fb0a363d65d86675884b34a09043c81e5562f11c1f8e1"
-dependencies = [
- "proc-macro2 0.4.30",
-]
-
-[[package]]
-name = "quote"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "053a8c8bcc71fcce321828dc897a98ab9760bef03a4fc36693c231e5b3216cfe"
 dependencies = [
- "proc-macro2 1.0.6",
+ "proc-macro2",
 ]
 
 [[package]]
@@ -255,10 +258,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "11a7e20d1cce64ef2fed88b66d347f88bd9babb82845b2b858f3edbf59a4f716"
 
 [[package]]
+name = "rustc_version"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bfa0f585226d2e68097d4f95d113b15b83a82e819ab25717ec0590d9584ef366"
+dependencies = [
+ "semver",
+]
+
+[[package]]
 name = "ryu"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bfa8506c1de11c9c4e4c38863ccbe02a305c8188e85a05a784c9e11e1c3910c8"
+
+[[package]]
+name = "semver"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "568a8e6258aa33c13358f81fd834adb854c6f7c9468520910a9b1e8fac068012"
 
 [[package]]
 name = "serde"
@@ -272,9 +290,9 @@ version = "1.0.101"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4b133a43a1ecd55d4086bd5b4dc6c1751c68b1bfbeba7a5040442022c7e7c02e"
 dependencies = [
- "proc-macro2 1.0.6",
- "quote 1.0.2",
- "syn 1.0.5",
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -302,24 +320,13 @@ checksum = "8ea5119cdb4c55b55d432abb513a0429384878c15dde60cc77b1c99de1a95a6a"
 
 [[package]]
 name = "syn"
-version = "0.15.44"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ca4b3b69a77cbe1ffc9e198781b7acb0c7365a883670e8f1c1bc66fba79a5c5"
-dependencies = [
- "proc-macro2 0.4.30",
- "quote 0.6.13",
- "unicode-xid 0.1.0",
-]
-
-[[package]]
-name = "syn"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "66850e97125af79138385e9b88339cbcd037e3f28ceab8c5ad98e64f0f1f80bf"
 dependencies = [
- "proc-macro2 1.0.6",
- "quote 1.0.2",
- "unicode-xid 0.2.0",
+ "proc-macro2",
+ "quote",
+ "unicode-xid",
 ]
 
 [[package]]
@@ -354,12 +361,6 @@ name = "unicode-width"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7007dbd421b92cc6e28410fe7362e2e0a2503394908f417b68ec8d1c364c4e20"
-
-[[package]]
-name = "unicode-xid"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc72304796d0818e357ead4e000d19c9c174ab23dc11093ac919054d20a6a7fc"
 
 [[package]]
 name = "unicode-xid"

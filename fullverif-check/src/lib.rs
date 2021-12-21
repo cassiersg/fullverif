@@ -64,11 +64,10 @@ fn rnd_timing_disp<'a>(
 fn check_gadget<'a, 'b>(
     gadgets: &'b gadgets::Gadgets<'a>,
     gadget_name: gadgets::GKind<'a>,
-    check_state_cleared: bool,
     check_rnd_annot: bool,
-    check_transitions: bool,
     controls: &mut clk_vcd::ModuleControls,
-) -> CResult<'a, Option<tg_graph::AGadgetFlow<'a, 'b>>> {
+    config: &config::Config,
+) -> CResult<'a, Option<tg_graph::GadgetFlow<'a, 'b>>> {
     let gadget = &gadgets[&gadget_name];
     match gadget.strat {
         netlist::GadgetStrat::Assumed => Ok(None),
@@ -87,8 +86,10 @@ fn check_gadget<'a, 'b>(
             let ugg = gg.unroll(controls)?;
             ugg.check_outputs_valid(ugg.annotate_valid())?;
             println!("outputs valid");
-            ugg.check_state_cleared(ugg.annotate_sensitive())?;
-            println!("state cleared");
+            if config.check_state_cleared {
+                ugg.check_state_cleared(ugg.annotate_sensitive())?;
+                println!("state cleared");
+            }
             let _cg = ugg.computation_graph(ugg.annotate_sensitive());
             Ok(None)
         }
@@ -103,7 +104,7 @@ fn check_gadget<'a, 'b>(
 
             let n_simu_cycles = controls.len() as gadgets::Latency;
             let max_delay_output = gadget.max_output_lat();
-            if check_state_cleared {
+            if config.check_state_cleared {
                 assert!(max_delay_output + 1 < n_simu_cycles);
             } else if max_delay_output + 1 > n_simu_cycles {
                 println!(
@@ -114,7 +115,7 @@ fn check_gadget<'a, 'b>(
                 );
                 return Ok(None);
             }
-            let n_analysis_cycles = if check_state_cleared {
+            let n_analysis_cycles = if config.check_state_cleared {
                 max_delay_output + 2
             } else {
                 max_delay_output + 1
@@ -125,18 +126,13 @@ fn check_gadget<'a, 'b>(
             );
             println!("Loaded simulation states.");
             println!("to graph...");
-            let graph = tg_graph::BGadgetFlow::unroll(
-                gadget_internals.clone(),
-                n_analysis_cycles,
-                controls,
-            )?;
-            let _a_graph = graph.annotate()?;
-            println!("annotation done");
-            if false {
-                _a_graph.disp_full();
+            let graph =
+                tg_graph::GadgetFlow::new(gadget_internals.clone(), n_analysis_cycles, controls)?;
+            if config.verbose {
+                graph.disp_full();
             }
             println!("Valid gadgets:");
-            let mut valid_gadgets: Vec<String> = _a_graph
+            let mut valid_gadgets: Vec<String> = graph
                 .list_valid()
                 .into_iter()
                 .map(|(g, c)| format!("\t{}: {}", g, format_set(c.into_iter())))
@@ -146,20 +142,20 @@ fn check_gadget<'a, 'b>(
                 println!("{}", vg);
             }
             println!("Sensitive gadgets:");
-            for (g, c) in _a_graph.list_sensitive(tg_graph::Sensitive::Yes) {
+            for (g, c) in graph.list_sensitive(tg_graph::Sensitive::Yes) {
                 println!("\t{}: {}", g, format_set(c.into_iter()));
             }
             println!("Glitch-sensitive gadgets:");
-            for (g, c) in _a_graph.list_sensitive(tg_graph::Sensitive::Glitch) {
+            for (g, c) in graph.list_sensitive(tg_graph::Sensitive::Glitch) {
                 println!("\t{}: {}", g, format_set(c.into_iter()));
             }
-            _a_graph.check_valid_outputs()?;
+            graph.check_valid_outputs()?;
             println!("Outputs valid: ok.");
             println!("Inputs exist.");
-            for name in _a_graph.warn_useless_rnd() {
+            for name in graph.warn_useless_rnd() {
                 println!("Warning: the gadget {:?} does not perform valid computations, but it has sensitive inputs, hence requires randomness to not leak them. Consider muxing the sensitive inputs to avoid wasting randomness.", name);
             }
-            let _rnd_times2 = _a_graph.randoms_input_timing(controls)?;
+            let _rnd_times2 = graph.randoms_input_timing(controls)?;
             println!("Randoms timed");
             println!("rnd_times:");
             for (i, times) in rnd_timing_disp(_rnd_times2.keys()).into_iter().enumerate() {
@@ -169,17 +165,17 @@ fn check_gadget<'a, 'b>(
                 }
             }
             if check_rnd_annot {
-                _a_graph.check_randomness_usage(controls)?;
+                graph.check_randomness_usage(controls)?;
             }
-            if check_state_cleared {
-                _a_graph.check_state_cleared()?;
+            if config.check_state_cleared {
+                graph.check_state_cleared()?;
             }
-            if check_transitions {
-                _a_graph.check_parallel_seq_gadgets()?;
+            if config.check_transitions {
+                graph.check_parallel_seq_gadgets()?;
             }
-            comp_prop::check_sec_prop(&_a_graph)?;
+            comp_prop::check_sec_prop(&graph)?;
             println!("check successful for gadget {}", gadget_name);
-            Ok(Some(_a_graph))
+            Ok(Some(graph))
         }
     }
 }
@@ -189,19 +185,14 @@ fn check_gadget_top<'a>(
     netlist: &'a yosys::Netlist,
     simu: &mut impl Read,
     root_simu_mod: Vec<String>,
-    gadget_name: &'a str,
-    dut: String,
-    clk: String,
-    input_valid_signal: String,
-    check_state_cleared: bool,
-    check_transitions: bool,
+    config: &'a config::Config,
 ) -> Result<(), CompErrors<'a>> {
-    let gadget_name = gadget_name.into();
+    let gadget_name = config.gname.as_ref();
     let gadgets = gadgets::netlist2gadgets(netlist)?;
     println!("checking gadget {:?}", gadget_name);
 
     let mut clk_path = root_simu_mod.clone();
-    clk_path.push(clk);
+    clk_path.push(config.clk.clone());
     let vcd_states = clk_vcd::VcdStates::new(simu, &clk_path)?;
 
     let mut cycle_count_path = root_simu_mod.clone();
@@ -213,14 +204,14 @@ fn check_gadget_top<'a>(
     });
 
     let mut in_valid_path = root_simu_mod.clone();
-    in_valid_path.push(input_valid_signal);
+    in_valid_path.push(config.in_valid.clone());
 
     let mut dut_path = root_simu_mod;
-    dut_path.push(dut);
+    dut_path.push(config.dut.clone());
     let mut controls = clk_vcd::ModuleControls::from_enable(&vcd_states, dut_path, &in_valid_path)?;
 
     let n_cycles = controls.len() as gadgets::Latency;
-    let max_delay_output = if let Some(g) = gadgets.get(&gadget_name) {
+    let max_delay_output = if let Some(g) = gadgets.get(&gadgets::GKind::from(gadget_name)) {
         g.max_output_lat()
     } else {
         return Err(CompError {
@@ -234,16 +225,16 @@ fn check_gadget_top<'a>(
         .into());
     };
     if (max_delay_output + 1 > n_cycles)
-        || (max_delay_output + 1 >= n_cycles && check_state_cleared)
+        || (max_delay_output + 1 >= n_cycles && config.check_state_cleared)
     {
         return Err(CompError {
-            module: Some(&netlist.modules[*gadget_name.get()]),
+            module: Some(&netlist.modules[gadget_name]),
             net: None,
             kind: CompErrorKind::Other(format!(
                 "Not enough simulated cycles to check the top-level gadget.\n\
                  Note: number of simulated cycles should be at least maximum output delay{}.\n\
                  Note: max_out_delay: {}, n_cycles: {}.",
-                if check_state_cleared {
+                if config.check_state_cleared {
                     " + 2 (since we are checking if state is cleared after last output)"
                 } else {
                     " + 1"
@@ -257,11 +248,10 @@ fn check_gadget_top<'a>(
 
     let g_graph = check_gadget(
         &gadgets,
-        gadget_name,
-        check_state_cleared,
+        gadgets::GKind::from(gadget_name),
         false,
-        check_transitions,
         &mut controls,
+        config,
     )?;
     let g_graph = if let Some(x) = g_graph {
         x
@@ -293,14 +283,7 @@ fn check_gadget_top<'a>(
             continue;
         }
 
-        let ur_sg = check_gadget(
-            &gadgets,
-            sg_name,
-            check_state_cleared,
-            true,
-            check_transitions,
-            &mut sg_controls,
-        )?;
+        let ur_sg = check_gadget(&gadgets, sg_name, true, &mut sg_controls, config)?;
         if let Some(ur_sg) = ur_sg {
             // FIXME Should also check "only glitch" gadgets
             for ((name, cycle), base) in ur_sg.sensitive_stable_gadgets() {
@@ -332,17 +315,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut file_simu = BufReader::new(file_simu);
     let netlist = yosys::Netlist::from_reader(file_synth)?;
     let root_simu_mod = vec![config.tb.clone()];
-    check_gadget_top(
-        &netlist,
-        &mut file_simu,
-        root_simu_mod,
-        config.gname.as_str(),
-        config.dut.clone(),
-        config.clk.clone(),
-        config.in_valid.clone(),
-        config.check_state_cleared,
-        config.check_transitions,
-    )
-    .map_err(|e| format!("{}", e))?;
+    check_gadget_top(&netlist, &mut file_simu, root_simu_mod, &config)
+        .map_err(|e| format!("{}", e))?;
     Ok(())
 }

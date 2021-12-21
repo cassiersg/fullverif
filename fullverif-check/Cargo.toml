@@ -13,8 +13,8 @@ vcd = "0.5"
 yosys-netlist-json = "0.0.2"
 clap = "2.33"
 phantom_newtype = "0.2"
-derivative =  { git = "https://github.com/mcarton/rust-derivative" }
-#derivative = "1.0.3"
+derivative =  "2.2"
+derive_more = "0.99"
 
 #flame = { version = "0.2.2", optional = true }
 #flamer = { version = "0.3", optional = true }
