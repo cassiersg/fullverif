@@ -125,8 +125,12 @@ fn check_gadget<'a, 'b>(
             );
             println!("Loaded simulation states.");
             println!("to graph...");
-            let graph = tg_graph::BGadgetFlow::unroll(gadget_internals.clone(), n_analysis_cycles)?;
-            let _a_graph = graph.annotate(controls)?;
+            let graph = tg_graph::BGadgetFlow::unroll(
+                gadget_internals.clone(),
+                n_analysis_cycles,
+                controls,
+            )?;
+            let _a_graph = graph.annotate()?;
             println!("annotation done");
             if false {
                 _a_graph.disp_full();
