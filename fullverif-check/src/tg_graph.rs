@@ -7,7 +7,7 @@ use crate::gadgets::{self, Input, Latency, Sharing};
 use crate::netlist::{self, RndLatencies};
 use petgraph::{
     graph::{self, EdgeReference, NodeIndex},
-    visit::{EdgeRef, IntoNodeIdentifiers},
+    visit::{EdgeFiltered, EdgeRef, IntoNodeIdentifiers},
     Direction, Graph,
 };
 use std::collections::{BinaryHeap, HashMap, HashSet};
@@ -305,6 +305,20 @@ impl<'a, 'b> GadgetFlow<'a, 'b> {
         return Ok(res);
     }
 
+    /// Filter out inputs of muxes that are not selected
+    fn mux_filterer(
+        edge_ref: EdgeReference<Edge<'a>>,
+        muxes_ctrls: &HashMap<NodeIndex, Option<bool>>,
+    ) -> bool {
+        match (
+            muxes_ctrls.get(&edge_ref.target()),
+            edge_ref.weight().input.0.port_name,
+        ) {
+            (Some(Some(true)), "in_false") | (Some(Some(false)), "in_true") => false,
+            _ => true,
+        }
+    }
+
     /// Sort the nodes in the graph, inputs first.
     /// Does not take into account the non-selected edge of a mux for the ordering.
     /// Err if there is a cycle in the graph.
@@ -313,14 +327,8 @@ impl<'a, 'b> GadgetFlow<'a, 'b> {
         internals: &gadget_internals::GadgetInternals<'a, 'b>,
         muxes_ctrls: &HashMap<NodeIndex, Option<bool>>,
     ) -> CResult<'a, Vec<NodeIndex>> {
-        let fggraph = petgraph::visit::EdgeFiltered::from_fn(&ggraph.0, |edge_ref| {
-            match (
-                muxes_ctrls.get(&edge_ref.target()),
-                edge_ref.weight().input.0.port_name,
-            ) {
-                (Some(Some(true)), "in_false") | (Some(Some(false)), "in_true") => false,
-                _ => true,
-            }
+        let fggraph = EdgeFiltered::from_fn(&ggraph.0, |edge_ref| {
+            Self::mux_filterer(edge_ref, muxes_ctrls)
         });
         Ok(petgraph::algo::toposort(&fggraph, None).map_err(|cycle| {
             CompError::ref_nw(
@@ -880,8 +888,9 @@ impl<'a, 'b> GadgetFlow<'a, 'b> {
                 false
             }
         });
-        // WIP
-        //let fgraph = petgraph::visit::EdgeFiltered::from_fn(&self.ggraph, |edge_ref| { });
+        let fgraph = EdgeFiltered::from_fn(&fgraph, |edge_ref| {
+            Self::mux_filterer(edge_ref, &self.muxes_ctrls)
+        });
         let mut dfs = petgraph::visit::Dfs::empty(&fgraph);
         for lat in start..end {
             dfs.move_to(self.g_nodes[&(name, lat)]);
