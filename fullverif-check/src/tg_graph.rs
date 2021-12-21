@@ -504,29 +504,14 @@ impl<'a, 'b> BGadgetFlow<'a, 'b> {
         let muxes_ctrls = self.muxes_controls(controls)?;
         let sorted_nodes = self.toposort(&muxes_ctrls)?;
         let (validities, sensitivities) = self.annotate_inner(&muxes_ctrls, &sorted_nodes)?;
-        let mut new_gadgets = Graph::with_capacity(
-            self.gadgets.raw_nodes().len(),
-            self.gadgets.raw_edges().len(),
+        let new_gadgets = self.gadgets.map(
+            |_, n| n.clone(),
+            |i, e| AEdge {
+                edge: e.clone(),
+                valid: validities[i.index()],
+                sensitive: sensitivities[i.index()],
+            },
         );
-        for (i, n) in self.gadgets.raw_nodes().iter().enumerate() {
-            assert_eq!(i, new_gadgets.add_node(n.weight.clone()).index());
-        }
-        for (i, e) in self.gadgets.raw_edges().iter().enumerate() {
-            assert_eq!(
-                i,
-                new_gadgets
-                    .add_edge(
-                        e.source(),
-                        e.target(),
-                        AEdge {
-                            edge: e.weight.clone(),
-                            valid: validities[i],
-                            sensitive: sensitivities[i],
-                        }
-                    )
-                    .index()
-            );
-        }
         Ok(AGadgetFlow {
             gadgets: new_gadgets,
             g_nodes: self.g_nodes.clone(),
@@ -962,6 +947,8 @@ impl<'a, 'b> AGadgetFlow<'a, 'b> {
                 false
             }
         });
+        //let muxes_ctrls = self.muxes_controls(controls).unwrap(); // Already checed for error.
+        // WIP
         let mut dfs = petgraph::visit::Dfs::empty(&fgraph);
         for lat in start..end {
             dfs.move_to(self.g_nodes[&(name, lat)]);
