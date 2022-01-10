@@ -324,7 +324,7 @@ impl<'a> fmt::Display for CompError<'a> {
                 }
             }
             CompErrorKind::ExcedentaryOutput(outputs) => {
-                writeln!(f, "The following outputs are valid (although annotation specifies they should not be valid):")?;
+                writeln!(f, "The following outputs are sensitive (although annotation specifies they should not be valid):")?;
                 // Map { cycle -> Map { sharing_port_name -> List { sharing_offset } } }
                 let mut exc_outputs: HashMap<u32, HashMap<&str, Vec<u32>>> = HashMap::new();
                 for (sharing, cycle) in outputs {

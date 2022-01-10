@@ -44,8 +44,15 @@ pub fn format_set<T: Int>(it: impl Iterator<Item = T>) -> String {
             res.push_str(&format!("{}", start));
         } else if start + T::one() == end {
             res.push_str(&format!("{}, {}", start, end));
+        } else if start + T::one() + T::one() == end {
+            res.push_str(&format!("{}, {}, {}", start, start + T::one(), end));
         } else {
-            res.push_str(&format!("{{{}, ..., {}}}", start, end));
+            res.push_str(&format!(
+                "{{{}, {}, ..., {}}}",
+                start,
+                start + T::one(),
+                end
+            ));
         }
     }
     if res.is_empty() {
