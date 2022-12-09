@@ -649,8 +649,12 @@ impl<'a, 'b> GadgetFlow<'a, 'b> {
                 // outside world.
                 if self.edge_sensitive(e) == Sensitive::Yes {
                     let (sh, lat) = e.weight().input;
-                    if self.internals.gadget.outputs.get(&sh).map(|l| *l == lat) != Some(true) {
-                        return Some((sh, lat));
+                    if let Some(l) = self.internals.gadget.outputs.get(&sh) {
+                        if *l != lat {
+                            return Some((sh, lat, Some(*l)));
+                        }
+                    } else {
+                        return Some((sh, lat, None));
                     }
                 }
                 return None;

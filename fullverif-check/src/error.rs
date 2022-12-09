@@ -89,7 +89,7 @@ pub enum CompErrorKind<'a> {
         yosys::BitVal,
     ),
     OutputNotValid(Vec<(gadgets::Sharing<'a>, Latency)>),
-    ExcedentaryOutput(Vec<(gadgets::Sharing<'a>, Latency)>),
+    ExcedentaryOutput(Vec<(gadgets::Sharing<'a>, Latency, Option<Latency>)>),
     MixedOrder(GName<'a>, u32, u32),
     Vcd,
 }
@@ -325,27 +325,28 @@ impl<'a> fmt::Display for CompError<'a> {
             }
             CompErrorKind::ExcedentaryOutput(outputs) => {
                 writeln!(f, "The following outputs are sensitive (although annotation specifies they should not be valid):")?;
-                // Map { cycle -> Map { sharing_port_name -> List { sharing_offset } } }
-                let mut exc_outputs: HashMap<u32, HashMap<&str, Vec<u32>>> = HashMap::new();
-                for (sharing, cycle) in outputs {
+                // Map { cycle -> Map { sharing_port_name -> (Option(correct latency), List { sharing_offset }) } }
+                let mut exc_outputs: HashMap<u32, HashMap<&str, (Option<Latency>, Vec<u32>)>> = HashMap::new();
+                for (sharing, cycle, expected_lat) in outputs {
                     exc_outputs
                         .entry(*cycle)
                         .or_insert_with(HashMap::new)
                         .entry(sharing.port_name)
-                        .or_insert_with(Vec::new)
+                        .or_insert_with(|| (*expected_lat, Vec::new()))
+                        .1
                         .push(sharing.pos);
                 }
-                // Map { cycle -> List { (sharing_port_name, List { sharing_offset } ) }
-                let exc_outputs: HashMap<u32, Vec<(&str, Vec<u32>)>> = exc_outputs
+                // Map { cycle -> List { (sharing_port_name, Option(expected latency), List { sharing_offset } ) }
+                let exc_outputs: HashMap<u32, Vec<(&str, Option<Latency>, Vec<u32>)>> = exc_outputs
                     .into_iter()
                     .map(|(cycle, sharings)| {
-                        let mut s = sharings.into_iter().collect::<Vec<_>>();
+                        let mut s = sharings.into_iter().map(|(port_name, (exp_lat, offsets))| (port_name, exp_lat, offsets)).collect::<Vec<_>>();
                         s.sort_unstable();
                         (cycle, s)
                     })
                     .collect();
-                // Map { Vec { (sharing_port_name, List { sharing_offset }) } -> List { cycle } }
-                let mut exc_outputs_rev: HashMap<&Vec<(&str, Vec<u32>)>, Vec<u32>> = HashMap::new();
+                // Map { Vec { (sharing_port_name, Option(expected_lat), List { sharing_offset }) } -> List { cycle } }
+                let mut exc_outputs_rev: HashMap<&Vec<(&str, Option<Latency>, Vec<u32>)>, Vec<u32>> = HashMap::new();
                 for (cycle, map) in exc_outputs.iter() {
                     exc_outputs_rev
                         .entry(map)
@@ -361,13 +362,14 @@ impl<'a> fmt::Display for CompError<'a> {
                 let mut exc_output_ports: Vec<&str> = Vec::new();
                 for cycles in cycles_grouped {
                     writeln!(f, "\tCycles {}", format_set(cycles.iter().copied()))?;
-                    for (exc_output, sharings) in exc_outputs_grouped[cycles].iter() {
-                        writeln!(
-                            f,
-                            "\t\tOutput port {}, shares {}",
-                            exc_output,
-                            format_set(sharings.iter().cloned())
-                        )?;
+                    for (exc_output, expected_lat, sharings) in exc_outputs_grouped[cycles].iter() {
+                        write!(f, "\t\tOutput port {}", exc_output)?;
+                        if let Some(lat) = expected_lat {
+                            write!(f, "(expected lat {})", lat)?;
+                        } else {
+                            write!(f, "(not a sharing)")?;
+                        }
+                        writeln!(f, ", shares {}", format_set(sharings.iter().cloned()))?;
                     }
                     exc_output_ports.clear();
                 }
