@@ -180,6 +180,11 @@ fn check_gadget<'a, 'b>(
     }
 }
 
+/// Return the path of a signal in a module, splitting the signal name if needed.
+fn signal_path(module: &[String], sig_name: &str) -> Vec<String> {
+    module.iter().cloned().chain(sig_name.split('.').map(ToOwned::to_owned)).collect()
+}
+
 /// Verify that the top-level gadets (and all sub-gadgets) satisfy the rules.
 fn check_gadget_top<'a>(
     netlist: &'a yosys::Netlist,
@@ -191,23 +196,18 @@ fn check_gadget_top<'a>(
     let gadgets = gadgets::netlist2gadgets(netlist)?;
     println!("checking gadget {:?}", gadget_name);
 
-    let mut clk_path = root_simu_mod.clone();
-    clk_path.push(config.clk.clone());
+    let clk_path = signal_path(root_simu_mod.as_slice(), config.clk.as_str());
     let vcd_states = clk_vcd::VcdStates::new(simu, &clk_path)?;
 
-    let mut cycle_count_path = root_simu_mod.clone();
-    cycle_count_path.push("cycle_count".to_string());
+    let cycle_count_path = signal_path(root_simu_mod.as_slice(), "cycle_count");
     let _ = vcd_states.get_var_id(&cycle_count_path).map(|id| {
         for i in 0..vcd_states.len() {
             debug!("cycle_count[{}] = {:?}", i, vcd_states.get_var(id, i));
         }
     });
 
-    let mut in_valid_path = root_simu_mod.clone();
-    in_valid_path.push(config.in_valid.clone());
-
-    let mut dut_path = root_simu_mod;
-    dut_path.push(config.dut.clone());
+    let in_valid_path =  signal_path(root_simu_mod.as_slice(), config.in_valid.as_str());
+    let dut_path =  signal_path(root_simu_mod.as_slice(), config.dut.as_str());
     let mut controls = clk_vcd::ModuleControls::from_enable(&vcd_states, dut_path, &in_valid_path)?;
 
     let n_cycles = controls.len() as gadgets::Latency;
@@ -314,7 +314,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     })?;
     let mut file_simu = BufReader::new(file_simu);
     let netlist = yosys::Netlist::from_reader(file_synth)?;
-    let root_simu_mod = vec![config.tb.clone()];
+    let root_simu_mod = signal_path(&[], config.tb.as_str());
     check_gadget_top(&netlist, &mut file_simu, root_simu_mod, &config)
         .map_err(|e| format!("{}", e))?;
     Ok(())
